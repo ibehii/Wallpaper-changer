@@ -2,13 +2,13 @@
 **With this script you can change your wallpaper with ability to set pause period.**
 
 <video width="500" height="320" controls>
-    <source src=""
+    <source src="https://user-images.githubusercontent.com/79264026/175045839-548f5990-6896-4126-b0ad-dd3eb707ba5c.mp4"
         type="video/mp4">
 </video>
 
-With this script you can change your wallpaper with ability to set pause period.
+Simple explanation for what this script can do: You give path of one folder that has images in it, and script set all image as wallpaper with pause between it and, you can set pause time 
 
 ### ***This script just work on linux distro that use gnome***
 --- ---
-- You can put your photo in **photos** folder or give coplate path of directory 
+- You can put your photo in **photos** folder or give complete path of directory 
 example : `/home/user/Pictures/`
