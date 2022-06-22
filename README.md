@@ -2,7 +2,7 @@
 **With this script you can change your wallpaper with ability to set pause period.**
 
 <video width="500" height="320" controls>
-    <source src="https://user-images.githubusercontent.com/79264026/175045839-548f5990-6896-4126-b0ad-dd3eb707ba5c.mp4"
+    <source src="https://user-images.githubusercontent.com/79264026/175100810-22525b28-457d-4557-bb02-70a30b97297a.mp4"
         type="video/mp4">
 </video>
 
