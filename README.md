@@ -1,9 +1,11 @@
 # Timed wallpeper changer
 **With this script you can change your wallpaper with ability to set pause period.**
 
-<video width="320" height="240" controls>
-  <source src="https://user-images.githubusercontent.com/79264026/157451846-f8d829ab-9439-488a-849d-05d3e828a692.mp4" type="video/mp4">
+<video width="500" height="320" controls>
+    <source src="https://user-images.githubusercontent.com/79264026/175102693-45906b72-f028-4bd0-8839-19421f9aa216.mp4"
+        type="video/mp4">
 </video>
+
 
 Simple explanation for what this script can do: You give path of one folder that has images in it, and script set all image as wallpaper with pause between it and, you can set pause time 
 
