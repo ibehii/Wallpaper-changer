@@ -7,6 +7,8 @@
 
 # After set all wallpaper, do you want to exit or start from the beginning?
 # True = start from the beginning , False = exit after set all wallpaper
+import colorama
+
 Again = False
 
 #import part
