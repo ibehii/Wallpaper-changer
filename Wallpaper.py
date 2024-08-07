@@ -35,8 +35,12 @@ def file_validator(photo_path) -> list[str]:
     
     return valid_file
              
+@click.group()             
+def cli():
+    pass
+
 @click.command()
-@click.option('--pause', '-p', type=(int, float) ,required=True, prompt=f'{Fore.GREEN}[+] - Please set pause duration between changing wallpaper {Fore.RESET}', help="amount of secondes between changing wallpaper")
+@click.option('--pause', '-p', type=int ,required=True, prompt=f'{Fore.GREEN}[+] - Please set pause duration between changing wallpaper {Fore.RESET}', help="amount of secondes between changing wallpaper")
 @click.option('--repetition', '-r', type=bool, is_flag=bool, default = True, show_default=True, help='By setting it false, program will exit after it set all wallpaper')
 @click.option('--theme', '-t', type=click.Choice(['dark', 'light'], case_sensitive=False), default = None, help='By default the script will change the wallpaper in both dark and light theme.\nBy specify the theme changes will apply on specif theme')
 @click.argument('photo_path', type=click.Path(exists=True, file_okay=False, executable=False, dir_okay=True, resolve_path=True))
@@ -52,3 +56,24 @@ def gnome(pause, photo_path, repetition, theme) -> None:
             sleep(pause)
         else:
             exit() if repetition == False else ...
+
+@click.command()
+@click.option('--pause', '-p', type=(int, float) ,required=True, prompt=f'{Fore.GREEN}[+] - Please set pause duration between changing wallpaper {Fore.RESET}', help="amount of secondes between changing wallpaper")
+@click.option('--repetition', '-r', type=bool, is_flag=bool, default = True, show_default=True, help='By setting it false, program will exit after it set all wallpaper')
+@click.argument('photo_path', type=click.Path(exists=True, file_okay=False, executable=False, dir_okay=True, resolve_path=True))
+def cinnamon(pause, photo_path, repetition) -> None:
+    '''Changes wallpaper on cinnamon'''
+    photos: list[str] = file_validator(photo_path)
+    while True:
+        for photo in photos: 
+            system(f'gsettings set org.cinnamon.desktop.background picture-uri  file://{photo}"')
+            sleep(pause)
+        else:
+            exit() if repetition == False else ...
+            
+# ======== # adding subcommand to cli# ======== #
+cli.add_command(gnome)
+cli.add_command(cinnamon)
+
+if __name__ == '__main__':
+    cli()
