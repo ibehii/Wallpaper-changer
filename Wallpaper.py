@@ -1,119 +1,54 @@
-# Github: https://github.com/beh185
-# Telegram: https://T.me/dr_xz
-# e-mail: BehnamH.dev@gmail.com
+# Github: https://github.com/ibehii
+# Telegram: https://T.me/BZHNAM
+# e-mail: behii@tutanota.com
 # ____________________________________________
 
-# Notice : This script work on gnome and cinnamon
+# Notice : This script only works on gnome and cinnamon
 
-# After set all wallpaper, do you want to exit or start from the beginning?
-# True = start from the beginning , False = exit after set all wallpaper
-Again = False
-
-# Set this "True" if you are using dark-theme
-dark_theme = True
-
-#import part
+# ======== # import part # ======== #
+from colorama import Fore, Style
+import click
+from PIL import Image
 from time import sleep
 from os import system, listdir, getcwd , path
 from pathlib import Path
 import platform
 import subprocess
 
-class colors:
-    red = '\033[31m'
-    green = '\033[32m'
-    purple = '\033[35m'
-    cyan = '\033[36m'
-    yellow = '\033[93m'
-    lightblue = '\033[94m'
-    reset = '\033[0m'
+# ======== # checking for compatible operating system # ======== #
+user_desktop: str = str(subprocess.check_output('echo $XDG_CURRENT_DESKTOP', shell=True), 'utf-8').replace('\n', '')
+exit(Fore.RED + f'This script only works on linux distribution with {Style.BRIGHT} Gnome and Cinnamon' + Fore.RESET) if platform.platform().lower() == 'linux' and user_desktop.lower() in ['gnome', 'cinnamon'] else system('clear')
 
-
-# what de user is using
-user_de = subprocess.check_output('echo $XDG_CURRENT_DESKTOP', shell=True)
-user_de = str(user_de, 'UTF-8').replace('\n', '')
-
-# check if user is using gnome or cinnamon
-if (user_de == 'GNOME' or user_de == 'CINNAMON'):
-    # clear screen
-    system('clear')
-else:
-    exit(colors.red +f'This script is not support in {user_de}. Use gnome or cinnamon‌ !' + colors.reset )
-# ask for wallpaper path
-wallpapers_path = input(colors.yellow + "Enter the complete path of folder with picture [if you want to use default folder just press \"enter\"] : " + colors.reset) 
-
-# pause between changing wallpaper in "second"
-pause = int(input(colors.yellow + 'set pause time between changing Wallpaper → '+ colors.reset ))
-
-def wallpaper_changer(user_path, pause):
-    # get all file in directory
-    directory_dir_unqualified = listdir(user_path)
-    directory_dir = []
-    # check if files are suitable for wallpaper. JUST png, jpg, jpeg, tiff, tif, gif, svg are allow
-    for qualified_file in directory_dir_unqualified: 
-        if( 'png' in qualified_file or 'jpg' in qualified_file or 'jpeg' in qualified_file  or 'tiff' in qualified_file or 'tif' in qualified_file or 'gif' in qualified_file or 'svg' in qualified_file ):
-            directory_dir.append(qualified_file)
-        else:
-            print(colors.red + '"' + qualified_file + '"' + ' isn\'t image' + colors.reset)
+def file_validator(photo_path) -> list[str]:
+    '''Checking directory for valid image file'''
+    valid_file: list = []
     
+    for filename in listdir(photo_path):
+        file_path = path.join(photo_path, filename)
+        try:
+            # ===== # checking image for broken byte or ... problem # ===== #
+            Image.open(file_path).verify()
+        except (OSError, IOError):
+            continue
+        else:
+            valid_file.append(file_path)
+    
+    return valid_file
+             
+@click.command()
+@click.option('--pause', '-p', type=(int, float) ,required=True, prompt=f'{Fore.GREEN}[+] - Please set pause duration between changing wallpaper {Fore.RESET}', help="amount of secondes between changing wallpaper")
+@click.option('--repetition', '-r', type=bool, is_flag=bool, default = True, show_default=True, help='By setting it false, program will exit after it set all wallpaper')
+@click.option('--theme', '-t', type=click.Choice(['dark', 'light'], case_sensitive=False), default = None, help='By default the script will change the wallpaper in both dark and light theme.\nBy specify the theme changes will apply on specif theme')
+@click.argument('photo_path', type=click.Path(exists=True, file_okay=False, executable=False, dir_okay=True, resolve_path=True))
+def gnome(pause, photo_path, repetition, theme) -> None:
+    '''Changes wallpaper on gnome'''
+    photos: list[str] = file_validator(photo_path)
     while True:
-        for wallpaper_name in directory_dir:
-            print(colors.lightblue + 'Wallpaper will change to : ',wallpaper_name + colors.reset)
-            # Setting wallpaper for gnome
-            if (user_de == 'GNOME'):
-                if(dark_theme == False):
-                    system(
-                        f'gsettings set org.gnome.desktop.background picture-uri "file://{user_path}{wallpaper_name}" ')
-            
-                elif(dark_theme == True):
-                    system(
-                        f'gsettings set org.gnome.desktop.background picture-uri-dark "file://{user_path}{wallpaper_name}" ')
-                else:
-                    print(colors.red+ 'Please set \"dark_theme\" variable with \"True\" and \"False\" ' + colors.reset)
-                    break
-            elif(user_de == 'CINNAMON'):
-                system(f'gsettings set org.cinnamon.desktop.background picture-uri  file://{user_path}{wallpaper_name}"')
-            print(colors.green + '- Wallpaper change successfully !' + colors.reset)
-            sleep(1.5)
-            system('clear')
-            # Pause between changing wallpaper
-            for i in range(pause):
-                print(colors.green + f'Wallpaper will change in {pause-i} sec' + colors.reset)
-                sleep(1)
-                system('clear')
-        # checking, if user want start from beginning or not
-        if Again == False:
-            print(colors.green+ 'All image set as wallpaper !'  + colors.reset)
-            break
-        elif Again == True:
-            print(colors.red + 'Starting from the beginning ...' + colors.reset)
-            sleep(2)
+        for photo in photos: 
+            if(theme != None):
+                system(f'gsettings set org.gnome.desktop.background picture-uri-dark "file://{photo}"') if theme == 'dark' else system(f'gsettings set org.gnome.desktop.background picture-uri-dark "file://{photo}"')
+            else:
+                system(f'gsettings set org.gnome.desktop.background picture-uri-dark "file://{photo}" && gsettings set org.gnome.desktop.background picture-uri-dark "file://{photo}"')
+            sleep(pause)
         else:
-            print(colors.red + 'Please set \"Again\" variable with \"True\" and \"False\" ' + colors.reset)
-            break
-    # just for return sth :)
-    return 'Done !'
-    
-
-
-# if user choose default folder
-if wallpapers_path == "":
-    directory_pwd = __file__
-    current_script_name = Path(__file__).stem + '.py'
-    directory_pwd = directory_pwd.replace(current_script_name, '')
-    directory_pwd = directory_pwd + "/photos/"
-    if not path.exists(directory_pwd):
-        print(colors.red +"Error : There is no folder named \"photos\" in the current directory\nplease create one" + colors.reset)
-    else:
-        wallpaper_changer(directory_pwd, pause)
-
-# if user give path
-else:
-    if not path.exists(wallpapers_path):
-        print(colors.red +"Error : The folder \"{user_path}\" does not exist!\nplease enter complete path of the folder correctly".format(user_path = wallpapers_path) + colors.reset)
-    else:
-        if wallpapers_path.endswith('/'):
-            wallpaper_changer(wallpapers_path, pause)
-        else:
-            wallpapers_path = wallpapers_path + '/'
-            wallpaper_changer(wallpapers_path, pause)
+            exit() if repetition == False else ...
