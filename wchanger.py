@@ -57,7 +57,7 @@ def cli() -> None:
 @click.option('--pause', '-p', type=int ,required=True, prompt=f'{Fore.GREEN}[+] - Please set pause duration between changing wallpaper {Fore.RESET}', help="amount of secondes between changing wallpaper")
 @click.option('--repetition/--no-repetition', is_flag=bool, default = True, show_default=True, help='By setting --no-repetition, program will exit after it set all wallpaper')
 @click.option('--theme', '-t', type=click.Choice(['dark', 'light'], case_sensitive=False), default = None, help='By default the script will change the wallpaper in both dark and light theme.\nBy specify the theme changes will apply on specif theme')
-@click.option('--output', '-o', type=click.Choice(['console', 'log'], case_sensitive=False), default='console', show_default=True, help='choosing output of program between console or log file')
+@click.option('--output', '-o', type=click.Choice(['console', 'log'], case_sensitive=False), default='console', show_default=True, help='choosing output of program between showing on console or save into log file')
 @click.argument('photo_path', type=click.Path(exists=True, file_okay=False, executable=False, dir_okay=True, resolve_path=True), default=path.join(sys.path[0], 'photos'))
 def gnome(pause, photo_path, repetition, theme, output) -> None:
     '''Changes wallpaper on gnome'''
@@ -79,7 +79,7 @@ def gnome(pause, photo_path, repetition, theme, output) -> None:
 @click.command()
 @click.option('--pause', '-p', type=(int, float) ,required=True, prompt=f'{Fore.GREEN}[+] - Please set pause duration between changing wallpaper {Fore.RESET}', help="amount of secondes between changing wallpaper")
 @click.option('--repetition', '-r', type=bool, is_flag=bool, default = True, show_default=True, help='By setting it false, program will exit after it set all wallpaper')
-@click.option('--output', '-o', type=click.Choice(['console', 'log'], case_sensitive=False), default='console', show_default=True, help='choosing output of program between console or log file')
+@click.option('--output', '-o', type=click.Choice(['console', 'log'], case_sensitive=False), default='console', show_default=True, help='choosing output of program between showing on console or save into log file')
 @click.argument('photo_path', type=click.Path(exists=True, file_okay=False, executable=False, dir_okay=True, resolve_path=True), default=path.join(sys.path[0], 'photos'))
 def cinnamon(pause, photo_path, repetition, output) -> None:
     '''Changes wallpaper on cinnamon'''
