@@ -337,10 +337,11 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertEqual(exception_context.exception.code, 1)
 
     @patch("shutil.which", return_value="/usr/bin/systemctl")
+    @patch("wchanger.detect_desktop_environment", return_value="gnome")
     @patch("click.prompt")
     @patch("subprocess.run")
     def test_setup_auto_start_sudo_failure(
-        self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
+        self, mock_run: MagicMock, mock_prompt: MagicMock, mock_detect: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start should exit with status 1 if sudo/systemctl fails."""
         image_path = self.test_dir / "test.png"
