@@ -391,30 +391,24 @@ def verify_system_requirements(target_desktop: str) -> None:
 
 def is_valid_image_file(image_path: Path) -> bool:
     """Verify that a path points to an actual, uncorrupted image file."""
-    if not image_path.is_file():
-        return False
-
-    extension = image_path.suffix.lower()
-    if extension not in SUPPORTED_IMAGE_EXTENSIONS:
-        return False
-
-    if extension == ".svg":
-        try:
-            return image_path.stat().st_size > 0
-        except OSError:
+    try:
+        if not image_path.is_file():
             return False
 
-    if HAS_PILLOW:
-        try:
+        extension = image_path.suffix.lower()
+        if extension not in SUPPORTED_IMAGE_EXTENSIONS:
+            return False
+
+        if extension == ".svg":
+            return image_path.stat().st_size > 0
+
+        if HAS_PILLOW:
             with Image.open(image_path) as opened_image:
                 opened_image.verify()
             return True
-        except (OSError, SyntaxError):
-            return False
 
-    try:
         return image_path.stat().st_size > 0
-    except OSError:
+    except (OSError, IOError, SyntaxError, getattr(Image, "UnidentifiedImageError", Exception)):
         return False
 
 
