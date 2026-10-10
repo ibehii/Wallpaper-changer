@@ -46,15 +46,25 @@ except ImportError:
     RESET = "\033[0m"
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageOps
 
     HAS_PILLOW = True
 except ImportError:
     HAS_PILLOW = False
 
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
 
-VERSION = "2.6.0"
+
+VERSION = "3.0.0"
 DEFAULT_PAUSE_SECONDS = 60
+DEFAULT_KEEP_LAST = 20
+DEFAULT_CONFIG_FILENAME = "config.toml"
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "wchanger"
 ONLINE_PROVIDER_CHOICES = ("wallhaven", "bing", "picsum", "loremflickr")
 
@@ -142,6 +152,63 @@ class DurationParamType(click.ParamType):
 
 
 DURATION_TYPE = DurationParamType()
+
+
+def get_default_config_path() -> Path:
+    """Return the filesystem path to the default configuration file."""
+    environment_override = os.environ.get("WCHANGER_CONFIG")
+    if environment_override:
+        return Path(environment_override)
+    script_config = Path(__file__).resolve().parent / DEFAULT_CONFIG_FILENAME
+    if script_config.exists():
+        return script_config
+    user_config = Path.home() / ".config" / "wchanger" / DEFAULT_CONFIG_FILENAME
+    if user_config.exists():
+        return user_config
+    return script_config
+
+
+def load_config_file(config_path: Path | str | None = None) -> dict[str, object]:
+    """Load settings from a TOML configuration file if it exists."""
+    if os.environ.get("WCHANGER_NO_CONFIG") == "1":
+        return {}
+
+    target_path = Path(config_path) if config_path is not None else get_default_config_path()
+    if not target_path.exists() or not target_path.is_file():
+        return {}
+
+    if tomllib is None:
+        click.secho(
+            f"[!] Warning: Cannot parse '{target_path}' because no TOML library is available.\n"
+            "    On Python < 3.11, install tomli via 'pip install tomli'.",
+            fg="yellow",
+            err=True,
+        )
+        return {}
+
+    try:
+        with open(target_path, "rb") as file_handle:
+            raw_data = tomllib.load(file_handle)
+    except Exception as error:
+        click.secho(
+            f"[!] Warning: Failed to parse configuration file '{target_path}': {error}.\n"
+            "    Falling back to standard CLI defaults.",
+            fg="yellow",
+            err=True,
+        )
+        return {}
+
+    if not isinstance(raw_data, dict):
+        return {}
+
+    # Support flat top-level keys or nested tables like [settings] / [wchanger]
+    merged_settings: dict[str, object] = dict(raw_data)
+    if "settings" in raw_data and isinstance(raw_data["settings"], dict):
+        merged_settings.update(raw_data["settings"])
+    if "wchanger" in raw_data and isinstance(raw_data["wchanger"], dict):
+        merged_settings.update(raw_data["wchanger"])
+
+    return merged_settings
 
 SUPPORTED_IMAGE_EXTENSIONS = {
     ".jpg",
@@ -373,20 +440,307 @@ def file_validator(directory_path: str | Path, recursive: bool = False) -> list[
     return valid_paths
 
 
-def set_gnome_background(file_uri: str, theme: str | None = None) -> bool:
+def _resolve_to_file_path(file_path_or_uri: str | Path) -> str:
+    """Normalize a file path or file:// URI into an absolute local filesystem path."""
+    raw_path_string = str(file_path_or_uri)
+    if raw_path_string.startswith("file://"):
+        parsed_url = urlparse(raw_path_string)
+        combined_path = parsed_url.path
+        if parsed_url.query:
+            combined_path = f"{combined_path}?{parsed_url.query}"
+        if parsed_url.fragment:
+            combined_path = f"{combined_path}#{parsed_url.fragment}"
+        return unquote(combined_path)
+    return str(Path(raw_path_string).resolve())
+
+
+def get_xrandr_monitors() -> list[dict[str, int]]:
+    """Parse xrandr --listmonitors to get connected monitor geometries."""
+    xrandr_bin = shutil.which("xrandr")
+    if not xrandr_bin:
+        return []
+    try:
+        proc = subprocess.run([xrandr_bin, "--listmonitors"], capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            return []
+        monitors: list[dict[str, int]] = []
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            match = re.search(r"\d+:\s+[+*]*\S+\s+(\d+)/\d+x(\d+)/\d+\+(\d+)\+(\d+)", line)
+            if not match:
+                match = re.search(r"\d+:\s+[+*]*\S+\s+(\d+)x(\d+)\+(\d+)\+(\d+)", line)
+            if match:
+                w, h, x, y = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+                monitors.append({"width": w, "height": h, "x": x, "y": y})
+        monitors.sort(key=lambda m: (m["x"], m["y"]))
+        return monitors
+    except Exception:
+        return []
+
+
+def get_kde_desktop_count(qdbus_executable: str | None = None) -> int:
+    """Query KDE Plasma via qdbus to get the count of active desktop containment objects."""
+    selected_executable = qdbus_executable or find_kde_qdbus_executable()
+    if not selected_executable:
+        return 0
+    command = [
+        selected_executable,
+        "org.kde.plasmashell",
+        "/PlasmaShell",
+        "org.kde.PlasmaShell.evaluateScript",
+        "desktops().length",
+    ]
+    try:
+        res = subprocess.run(command, capture_output=True, text=True, check=False)
+        if res.returncode == 0 and res.stdout.strip().isdigit():
+            return int(res.stdout.strip())
+    except Exception:
+        pass
+    return 0
+
+
+def get_xfce_monitor_properties() -> dict[str, list[str]]:
+    """Query xfconf-query to discover all last-image properties grouped by monitor/screen."""
+    list_process = subprocess.run(
+        ["xfconf-query", "-c", XFCE_CHANNEL, "-l"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if list_process.returncode != 0:
+        return {}
+
+    monitor_groups: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for line in list_process.stdout.splitlines():
+        property_candidate = line.strip()
+        if "last-image" in property_candidate and property_candidate not in seen:
+            seen.add(property_candidate)
+            match = re.search(r"/(screen\d+/monitor[^/]+)", property_candidate)
+            if not match:
+                match = re.search(r"/(monitor[^/]+)", property_candidate)
+            if not match:
+                match = re.search(r"/(screen\d+)", property_candidate)
+            mon_key = match.group(1) if match else property_candidate
+            monitor_groups.setdefault(mon_key, []).append(property_candidate)
+
+    return monitor_groups
+
+
+def detect_connected_monitors(desktop_environment: str | None = None) -> int:
+    """Detect the number of connected monitors/displays across desktop environments."""
+    if desktop_environment == "xfce":
+        xfce_props = get_xfce_monitor_properties()
+        if xfce_props:
+            return len(xfce_props)
+    elif desktop_environment == "kde":
+        kde_count = get_kde_desktop_count()
+        if kde_count > 0:
+            return kde_count
+
+    xrandr_monitors = get_xrandr_monitors()
+    if xrandr_monitors:
+        return len(xrandr_monitors)
+
+    try:
+        drm_statuses = list(Path("/sys/class/drm").glob("*/status"))
+        connected_count = 0
+        for status_file in drm_statuses:
+            try:
+                if status_file.read_text(encoding="utf-8").strip() == "connected":
+                    connected_count += 1
+            except (OSError, UnicodeDecodeError):
+                continue
+        if connected_count > 0:
+            return connected_count
+    except Exception:
+        pass
+
+    return 1
+
+
+def get_effective_monitor_count(
+    desktop_environment: str | None = None,
+    multi_monitor: bool = False,
+) -> int:
+    """Return monitor count, guaranteeing at least 2 when multi-monitor is requested."""
+    detected = detect_connected_monitors(desktop_environment)
+    if multi_monitor:
+        return max(2, detected)
+    return 1
+
+
+_SPANNED_TOGGLE: int = 0
+
+
+def create_spanned_wallpaper(
+    wallpapers: Sequence[str | Path],
+    output_path: Path | str | None = None,
+) -> Path:
+    """Stitch multiple wallpapers into a single spanned panoramic image using Pillow."""
+    global _SPANNED_TOGGLE
+    if not wallpapers:
+        raise ValueError("At least one wallpaper path is required to create spanned wallpaper.")
+
+    resolved_paths = [_resolve_to_file_path(p) for p in wallpapers]
+    if len(resolved_paths) == 1:
+        return Path(resolved_paths[0])
+
+    if not HAS_PILLOW:
+        return Path(resolved_paths[0])
+
+    cache_dir = Path.home() / ".cache" / "wchanger"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    if output_path is not None:
+        target_output = Path(output_path)
+    else:
+        # Alternate between two filenames so desktop environments (GNOME, Cinnamon, MATE)
+        # detect URI change on every cycle and reload the wallpaper without caching
+        _SPANNED_TOGGLE = 1 - _SPANNED_TOGGLE
+        target_output = cache_dir / f"multimonitor_spanned_{_SPANNED_TOGGLE}.png"
+
+    monitors = get_xrandr_monitors()
+    opened_images: list[Image.Image] = []
+    try:
+        for p in resolved_paths:
+            opened_images.append(Image.open(p).convert("RGB"))
+
+        resample_filter = getattr(Image, "Resampling", Image).LANCZOS
+
+        if monitors and len(monitors) >= len(opened_images):
+            total_w = max(m["x"] + m["width"] for m in monitors)
+            total_h = max(m["y"] + m["height"] for m in monitors)
+            canvas = Image.new("RGB", (total_w, total_h), color=(0, 0, 0))
+
+            for idx, mon in enumerate(monitors):
+                im = opened_images[idx % len(opened_images)]
+                if hasattr(ImageOps, "fit"):
+                    fitted = ImageOps.fit(im, (mon["width"], mon["height"]), method=resample_filter)
+                else:
+                    fitted = im.resize((mon["width"], mon["height"]), resample_filter)
+                canvas.paste(fitted, (mon["x"], mon["y"]))
+        else:
+            target_height = max(im.height for im in opened_images)
+            resized_images: list[Image.Image] = []
+            total_width = 0
+
+            for im in opened_images:
+                aspect = im.width / im.height if im.height > 0 else 1.0
+                new_width = max(1, int(target_height * aspect))
+                resized = im.resize((new_width, target_height), resample_filter)
+                resized_images.append(resized)
+                total_width += new_width
+
+            canvas = Image.new("RGB", (total_width, target_height), color=(0, 0, 0))
+            offset_x = 0
+            for im in resized_images:
+                canvas.paste(im, (offset_x, 0))
+                offset_x += im.width
+
+        canvas.save(target_output, format="PNG")
+        return target_output
+    except Exception as error:
+        logging.warning(f"Failed to create spanned wallpaper: {error}")
+        return Path(resolved_paths[0])
+    finally:
+        for im in opened_images:
+            try:
+                im.close()
+            except Exception:
+                pass
+
+
+def set_lxqt_multimonitor_config(file_paths: Sequence[str]) -> bool:
+    """Update LXQt ~/.config/pcmanfm-qt/lxqt/settings.conf for multiple monitors."""
+    config_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "pcmanfm-qt" / "lxqt"
+    config_file = config_dir / "settings.conf"
+    if not config_dir.exists():
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return False
+
+    lines: list[str] = []
+    if config_file.exists():
+        try:
+            lines = config_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+
+    sections_to_add: dict[str, str] = {}
+    for idx, path in enumerate(file_paths):
+        resolved = _resolve_to_file_path(path)
+        sections_to_add[f"Desktop_Screen_{idx}"] = resolved
+        if idx == 0:
+            sections_to_add["Desktop"] = resolved
+            sections_to_add["Desktop_Screen0"] = resolved
+        else:
+            sections_to_add[f"Desktop_Screen{idx}"] = resolved
+
+    new_lines: list[str] = []
+    current_section: str | None = None
+    handled_sections: set[str] = set()
+    skip_wallpaper_line = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current_section = stripped[1:-1]
+            if current_section in sections_to_add:
+                handled_sections.add(current_section)
+                new_lines.append(line)
+                new_lines.append(f"Wallpaper={sections_to_add[current_section]}")
+                skip_wallpaper_line = True
+                continue
+            else:
+                skip_wallpaper_line = False
+        elif skip_wallpaper_line and stripped.startswith("Wallpaper="):
+            continue
+        new_lines.append(line)
+
+    for sec, path in sections_to_add.items():
+        if sec.startswith("Desktop_Screen_") and sec not in handled_sections:
+            new_lines.append(f"\n[{sec}]")
+            new_lines.append(f"Wallpaper={path}")
+
+    try:
+        config_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def set_gnome_background(file_uri: str | Sequence[str], theme: str | None = None) -> bool:
     """Apply wallpaper URI to GNOME background schema."""
-    if not file_uri.startswith("file://"):
-        file_uri = Path(file_uri).resolve().as_uri()
+    if isinstance(file_uri, (str, Path)):
+        uris = [str(file_uri)]
+    else:
+        uris = [str(u) for u in file_uri]
+
+    if len(uris) > 1:
+        spanned_path = create_spanned_wallpaper(uris)
+        target_uri = Path(spanned_path).resolve().as_uri()
+        subprocess.run(
+            ["gsettings", "set", GNOME_SCHEMA, "picture-options", "spanned"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    else:
+        target_uri = uris[0]
+
+    if not target_uri.startswith("file://"):
+        target_uri = Path(target_uri).resolve().as_uri()
 
     gsettings_commands: list[list[str]] = []
 
     if theme == "dark":
-        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_DARK, file_uri])
+        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_DARK, target_uri])
     elif theme == "light":
-        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_LIGHT, file_uri])
+        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_LIGHT, target_uri])
     else:
-        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_LIGHT, file_uri])
-        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_DARK, file_uri])
+        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_LIGHT, target_uri])
+        gsettings_commands.append(["gsettings", "set", GNOME_SCHEMA, GNOME_KEY_DARK, target_uri])
 
     all_commands_succeeded = True
     for command in gsettings_commands:
@@ -402,12 +756,29 @@ def set_gnome_background(file_uri: str, theme: str | None = None) -> bool:
     return all_commands_succeeded
 
 
-def set_cinnamon_background(file_uri: str) -> bool:
+def set_cinnamon_background(file_uri: str | Sequence[str]) -> bool:
     """Apply wallpaper URI to Cinnamon background schema."""
-    if not file_uri.startswith("file://"):
-        file_uri = Path(file_uri).resolve().as_uri()
+    if isinstance(file_uri, (str, Path)):
+        uris = [str(file_uri)]
+    else:
+        uris = [str(u) for u in file_uri]
 
-    command = ["gsettings", "set", CINNAMON_SCHEMA, CINNAMON_KEY, file_uri]
+    if len(uris) > 1:
+        spanned_path = create_spanned_wallpaper(uris)
+        target_uri = Path(spanned_path).resolve().as_uri()
+        subprocess.run(
+            ["gsettings", "set", CINNAMON_SCHEMA, "picture-options", "spanned"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    else:
+        target_uri = uris[0]
+
+    if not target_uri.startswith("file://"):
+        target_uri = Path(target_uri).resolve().as_uri()
+
+    command = ["gsettings", "set", CINNAMON_SCHEMA, CINNAMON_KEY, target_uri]
     execution_result = subprocess.run(
         command,
         capture_output=True,
@@ -417,31 +788,69 @@ def set_cinnamon_background(file_uri: str) -> bool:
     return execution_result.returncode == 0
 
 
-def set_kde_background(file_uri: str, qdbus_executable: str | None = None) -> bool:
-    """Apply wallpaper URI to KDE Plasma desktop via qdbus evaluateScript."""
+def set_kde_background(
+    file_uri: str | Sequence[str],
+    qdbus_executable: str | None = None,
+) -> bool:
+    """Apply wallpaper URI(s) to KDE Plasma desktop via qdbus evaluateScript."""
     selected_executable = qdbus_executable or find_kde_qdbus_executable()
     if not selected_executable:
         return False
 
-    if file_uri.startswith("/") and not file_uri.startswith("file://"):
-        file_uri = Path(file_uri).resolve().as_uri()
+    if isinstance(file_uri, (str, Path)):
+        uris = [str(file_uri)]
+        is_single = True
+    else:
+        uris = [str(u) for u in file_uri]
+        is_single = len(uris) == 1
 
-    safe_uri = (
-        file_uri.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "")
-        .replace("\r", "")
-    )
+    if is_single:
+        single_uri = uris[0]
+        if not single_uri.startswith("file://"):
+            single_uri = Path(single_uri).resolve().as_uri()
 
-    script_content = (
-        "const allDesktops = desktops();\n"
-        "for (const desktop of allDesktops) {\n"
-        '    desktop.wallpaperPlugin = "org.kde.image";\n'
-        '    desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");\n'
-        f'    desktop.writeConfig("Image", "{safe_uri}");\n'
-        '    desktop.reloadConfig();\n'
-        "}\n"
-    )
+        safe_uri = (
+            single_uri.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "")
+            .replace("\r", "")
+        )
+
+        script_content = (
+            "const allDesktops = desktops();\n"
+            "for (const desktop of allDesktops) {\n"
+            '    desktop.wallpaperPlugin = "org.kde.image";\n'
+            '    desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");\n'
+            f'    desktop.writeConfig("Image", "{safe_uri}");\n'
+            '    desktop.reloadConfig();\n'
+            "}\n"
+        )
+    else:
+        normalized_uris: list[str] = []
+        for u in uris:
+            if not u.startswith("file://"):
+                u = Path(u).resolve().as_uri()
+            safe_u = (
+                u.replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\n", "")
+                .replace("\r", "")
+            )
+            normalized_uris.append(safe_u)
+
+        js_array_items = ", ".join(f'"{u}"' for u in normalized_uris)
+        script_content = (
+            "const allDesktops = desktops();\n"
+            f"const wallpaperList = [{js_array_items}];\n"
+            "for (let i = 0; i < allDesktops.length; i++) {\n"
+            "    const desktop = allDesktops[i];\n"
+            "    const imgUri = wallpaperList[i % wallpaperList.length];\n"
+            '    desktop.wallpaperPlugin = "org.kde.image";\n'
+            '    desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");\n'
+            '    desktop.writeConfig("Image", imgUri);\n'
+            "    desktop.reloadConfig();\n"
+            "}\n"
+        )
 
     command = [
         selected_executable,
@@ -460,23 +869,15 @@ def set_kde_background(file_uri: str, qdbus_executable: str | None = None) -> bo
     return execution_result.returncode == 0
 
 
-def _resolve_to_file_path(file_path_or_uri: str | Path) -> str:
-    """Normalize a file path or file:// URI into an absolute local filesystem path."""
-    raw_path_string = str(file_path_or_uri)
-    if raw_path_string.startswith("file://"):
-        parsed_url = urlparse(raw_path_string)
-        combined_path = parsed_url.path
-        if parsed_url.query:
-            combined_path = f"{combined_path}?{parsed_url.query}"
-        if parsed_url.fragment:
-            combined_path = f"{combined_path}#{parsed_url.fragment}"
-        return unquote(combined_path)
-    return str(Path(raw_path_string).resolve())
+def set_xfce_background(file_path: str | Sequence[str]) -> bool:
+    """Apply wallpaper path(s) to XFCE desktop via xfconf-query."""
+    if isinstance(file_path, (str, Path)):
+        wallpapers = [_resolve_to_file_path(file_path)]
+    else:
+        wallpapers = [_resolve_to_file_path(p) for p in file_path]
 
-
-def set_xfce_background(file_path: str) -> bool:
-    """Apply wallpaper path to XFCE desktop via xfconf-query."""
-    resolved_path = _resolve_to_file_path(file_path)
+    if not wallpapers:
+        return False
 
     list_process = subprocess.run(
         ["xfconf-query", "-c", XFCE_CHANNEL, "-l"],
@@ -486,6 +887,9 @@ def set_xfce_background(file_path: str) -> bool:
     )
 
     discovered_properties: list[str] = []
+    monitor_for_property: list[str] = []
+    distinct_monitors: list[str] = []
+
     if list_process.returncode == 0:
         seen_properties = set()
         for line in list_process.stdout.splitlines():
@@ -493,23 +897,38 @@ def set_xfce_background(file_path: str) -> bool:
             if "last-image" in property_candidate and property_candidate not in seen_properties:
                 seen_properties.add(property_candidate)
                 discovered_properties.append(property_candidate)
+                match = re.search(r"/(screen\d+/monitor[^/]+)", property_candidate)
+                if not match:
+                    match = re.search(r"/(monitor[^/]+)", property_candidate)
+                if not match:
+                    match = re.search(r"/(screen\d+)", property_candidate)
+                mon_key = match.group(1) if match else property_candidate
+                if mon_key not in distinct_monitors:
+                    distinct_monitors.append(mon_key)
+                monitor_for_property.append(mon_key)
 
     if not discovered_properties:
-        for fallback_property in XFCE_FALLBACK_PROPERTIES:
+        any_success = False
+        for idx, fallback_property in enumerate(XFCE_FALLBACK_PROPERTIES):
+            assigned_fallback = wallpapers[idx % len(wallpapers)]
             fallback_result = subprocess.run(
-                ["xfconf-query", "-c", XFCE_CHANNEL, "-p", fallback_property, "-s", resolved_path],
+                ["xfconf-query", "-c", XFCE_CHANNEL, "-p", fallback_property, "-s", assigned_fallback],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             if fallback_result.returncode == 0:
-                return True
-        return False
+                any_success = True
+                if len(wallpapers) == 1:
+                    return True
+        return any_success
 
     all_properties_succeeded = True
-    for target_property in discovered_properties:
+    for target_property, mon_key in zip(discovered_properties, monitor_for_property):
+        mon_idx = distinct_monitors.index(mon_key)
+        assigned_wallpaper = wallpapers[mon_idx % len(wallpapers)]
         set_result = subprocess.run(
-            ["xfconf-query", "-c", XFCE_CHANNEL, "-p", target_property, "-s", resolved_path],
+            ["xfconf-query", "-c", XFCE_CHANNEL, "-p", target_property, "-s", assigned_wallpaper],
             capture_output=True,
             text=True,
             check=False,
@@ -520,9 +939,25 @@ def set_xfce_background(file_path: str) -> bool:
     return all_properties_succeeded
 
 
-def set_mate_background(file_path: str) -> bool:
-    """Apply wallpaper path to MATE background schema."""
-    resolved_path = _resolve_to_file_path(file_path)
+def set_mate_background(file_path: str | Sequence[str]) -> bool:
+    """Apply wallpaper path(s) to MATE background schema."""
+    if isinstance(file_path, (str, Path)):
+        paths = [str(file_path)]
+    else:
+        paths = [str(p) for p in file_path]
+
+    if len(paths) > 1:
+        spanned_path = create_spanned_wallpaper(paths)
+        resolved_path = _resolve_to_file_path(spanned_path)
+        subprocess.run(
+            ["gsettings", "set", MATE_SCHEMA, "picture-options", "spanned"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    else:
+        resolved_path = _resolve_to_file_path(paths[0])
+
     command = ["gsettings", "set", MATE_SCHEMA, MATE_KEY, resolved_path]
     execution_result = subprocess.run(
         command,
@@ -533,9 +968,29 @@ def set_mate_background(file_path: str) -> bool:
     return execution_result.returncode == 0
 
 
-def set_lxqt_background(file_path: str) -> bool:
-    """Apply wallpaper path to LXQt desktop via pcmanfm-qt."""
-    resolved_path = _resolve_to_file_path(file_path)
+def set_lxqt_background(file_path: str | Sequence[str]) -> bool:
+    """Apply wallpaper path(s) to LXQt desktop via pcmanfm-qt."""
+    if isinstance(file_path, (str, Path)):
+        paths = [str(file_path)]
+    else:
+        paths = [str(p) for p in file_path]
+
+    if len(paths) > 1:
+        lxqt_updated = set_lxqt_multimonitor_config(paths)
+        if lxqt_updated:
+            reconf_res = subprocess.run(
+                ["pcmanfm-qt", "--reconfigure"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if reconf_res.returncode == 0:
+                return True
+        spanned_path = create_spanned_wallpaper(paths)
+        resolved_path = _resolve_to_file_path(spanned_path)
+    else:
+        resolved_path = _resolve_to_file_path(paths[0])
+
     command = ["pcmanfm-qt", f"--set-wallpaper={resolved_path}"]
     execution_result = subprocess.run(
         command,
@@ -621,6 +1076,47 @@ def download_online_wallpaper(image_url: str, destination_path: Path) -> Path:
     return destination_path
 
 
+def cleanup_download_cache(
+    cache_dir: Path | str,
+    keep_last: int = DEFAULT_KEEP_LAST,
+) -> list[Path]:
+    """Keep only the most recent 'keep_last' image files in cache_dir, deleting older ones."""
+    folder = Path(cache_dir)
+    if not folder.exists() or not folder.is_dir():
+        return []
+
+    effective_keep_limit = max(1, keep_last)
+
+    try:
+        image_files: list[Path] = [
+            entry
+            for entry in folder.iterdir()
+            if entry.is_file() and entry.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        ]
+    except (PermissionError, OSError) as error:
+        logging.warning(f"Failed to scan cache directory '{folder}' for cleanup: {error}")
+        return []
+
+    if len(image_files) <= effective_keep_limit:
+        return []
+
+    try:
+        image_files.sort(key=lambda file_path: file_path.stat().st_mtime, reverse=True)
+    except OSError as error:
+        logging.warning(f"Failed to inspect timestamps in cache directory '{folder}': {error}")
+        return []
+
+    deleted_files: list[Path] = []
+    for stale_file in image_files[effective_keep_limit:]:
+        try:
+            stale_file.unlink(missing_ok=True)
+            deleted_files.append(stale_file)
+        except OSError as error:
+            logging.warning(f"Failed to delete old cached wallpaper '{stale_file}': {error}")
+
+    return deleted_files
+
+
 def format_network_error(provider: str, error: Exception) -> str:
     """Format a user-friendly error message when network requests fail."""
     if isinstance(error, HTTPError):
@@ -639,40 +1135,74 @@ def format_network_error(provider: str, error: Exception) -> str:
 
 def set_wallpaper_for_desktop(
     desktop_environment: str,
-    wallpaper_path: Path | str,
+    wallpaper_path: Path | str | Sequence[Path | str],
     color_theme: str | None = None,
 ) -> tuple[bool, str]:
     """Apply wallpaper to the current desktop environment.
 
     Returns a tuple of (success_status, status_message).
     """
-    wallpaper_file = Path(wallpaper_path)
-    file_uri = wallpaper_file.resolve().as_uri()
-    resolved_path_str = str(wallpaper_path)
+    if isinstance(wallpaper_path, (list, tuple)):
+        is_multi = len(wallpaper_path) > 1
+        path_list = [str(p) for p in wallpaper_path]
+    else:
+        is_multi = False
+        path_list = [str(wallpaper_path)]
+
     operation_success = False
     status_message = ""
 
-    if desktop_environment == "gnome":
-        operation_success = set_gnome_background(file_uri, color_theme)
-        if color_theme is not None:
-            status_message = f"Wallpaper changed on GNOME to {wallpaper_path} in {color_theme} theme."
-        else:
-            status_message = f"Wallpaper changed on GNOME to {wallpaper_path} in both dark and light themes."
-    elif desktop_environment == "cinnamon":
-        operation_success = set_cinnamon_background(file_uri)
-        status_message = f"Wallpaper changed on Cinnamon to {wallpaper_path}."
-    elif desktop_environment == "kde":
-        operation_success = set_kde_background(file_uri)
-        status_message = f"Wallpaper changed on KDE Plasma to {wallpaper_path}."
-    elif desktop_environment == "xfce":
-        operation_success = set_xfce_background(resolved_path_str)
-        status_message = f"Wallpaper changed on XFCE to {wallpaper_path}."
-    elif desktop_environment == "mate":
-        operation_success = set_mate_background(resolved_path_str)
-        status_message = f"Wallpaper changed on MATE to {wallpaper_path}."
-    elif desktop_environment == "lxqt":
-        operation_success = set_lxqt_background(resolved_path_str)
-        status_message = f"Wallpaper changed on LXQt to {wallpaper_path}."
+    if not is_multi:
+        single_path = path_list[0]
+        wallpaper_file = Path(single_path)
+        file_uri = wallpaper_file.resolve().as_uri()
+        resolved_path_str = single_path
+
+        if desktop_environment == "gnome":
+            operation_success = set_gnome_background(file_uri, color_theme)
+            if color_theme is not None:
+                status_message = f"Wallpaper changed on GNOME to {wallpaper_path} in {color_theme} theme."
+            else:
+                status_message = f"Wallpaper changed on GNOME to {wallpaper_path} in both dark and light themes."
+        elif desktop_environment == "cinnamon":
+            operation_success = set_cinnamon_background(file_uri)
+            status_message = f"Wallpaper changed on Cinnamon to {wallpaper_path}."
+        elif desktop_environment == "kde":
+            operation_success = set_kde_background(file_uri)
+            status_message = f"Wallpaper changed on KDE Plasma to {wallpaper_path}."
+        elif desktop_environment == "xfce":
+            operation_success = set_xfce_background(resolved_path_str)
+            status_message = f"Wallpaper changed on XFCE to {wallpaper_path}."
+        elif desktop_environment == "mate":
+            operation_success = set_mate_background(resolved_path_str)
+            status_message = f"Wallpaper changed on MATE to {wallpaper_path}."
+        elif desktop_environment == "lxqt":
+            operation_success = set_lxqt_background(resolved_path_str)
+            status_message = f"Wallpaper changed on LXQt to {wallpaper_path}."
+    else:
+        count = len(path_list)
+        formatted_list = ", ".join(path_list)
+        if desktop_environment == "gnome":
+            operation_success = set_gnome_background(path_list, color_theme)
+            if color_theme is not None:
+                status_message = f"Wallpapers changed on GNOME across {count} monitors to [{formatted_list}] in {color_theme} theme."
+            else:
+                status_message = f"Wallpapers changed on GNOME across {count} monitors to [{formatted_list}] in both dark and light themes."
+        elif desktop_environment == "cinnamon":
+            operation_success = set_cinnamon_background(path_list)
+            status_message = f"Wallpapers changed on Cinnamon across {count} monitors to [{formatted_list}]."
+        elif desktop_environment == "kde":
+            operation_success = set_kde_background(path_list)
+            status_message = f"Wallpapers changed on KDE Plasma across {count} monitors to [{formatted_list}]."
+        elif desktop_environment == "xfce":
+            operation_success = set_xfce_background(path_list)
+            status_message = f"Wallpapers changed on XFCE across {count} monitors to [{formatted_list}]."
+        elif desktop_environment == "mate":
+            operation_success = set_mate_background(path_list)
+            status_message = f"Wallpapers changed on MATE across {count} monitors to [{formatted_list}]."
+        elif desktop_environment == "lxqt":
+            operation_success = set_lxqt_background(path_list)
+            status_message = f"Wallpapers changed on LXQt across {count} monitors to [{formatted_list}]."
 
     return operation_success, status_message
 
@@ -685,6 +1215,7 @@ def run_wallpaper_cycle(
     output_mode: str,
     color_theme: str | None = None,
     shuffle: bool = False,
+    multi_monitor: bool = False,
 ) -> None:
     """Cycle wallpapers in a clean loop with graceful interruption handling."""
     playlist = list(wallpapers)
@@ -693,35 +1224,75 @@ def run_wallpaper_cycle(
 
     try:
         while True:
-            for wallpaper in playlist:
-                wallpaper_file = Path(wallpaper)
-                if not wallpaper_file.exists():
-                    skip_message = f"Skipping missing wallpaper: {wallpaper}"
-                    if output_mode == "log":
-                        logging.warning(skip_message)
-                    else:
-                        print(f"{YELLOW}{skip_message}{RESET}")
-                    continue
+            if not multi_monitor:
+                for wallpaper in playlist:
+                    wallpaper_file = Path(wallpaper)
+                    if not wallpaper_file.exists():
+                        skip_message = f"Skipping missing wallpaper: {wallpaper}"
+                        if output_mode == "log":
+                            logging.warning(skip_message)
+                        else:
+                            print(f"{YELLOW}{skip_message}{RESET}")
+                        continue
 
-                operation_success, status_message = set_wallpaper_for_desktop(
-                    desktop_environment=desktop_environment,
-                    wallpaper_path=wallpaper,
-                    color_theme=color_theme,
-                )
+                    operation_success, status_message = set_wallpaper_for_desktop(
+                        desktop_environment=desktop_environment,
+                        wallpaper_path=wallpaper,
+                        color_theme=color_theme,
+                    )
 
-                if operation_success:
-                    if output_mode == "log":
-                        logging.info(status_message)
+                    if operation_success:
+                        if output_mode == "log":
+                            logging.info(status_message)
+                        else:
+                            print(f"{MAGENTA}{status_message}{RESET}")
                     else:
-                        print(f"{MAGENTA}{status_message}{RESET}")
-                else:
-                    failure_message = f"Failed to set wallpaper to {wallpaper}"
-                    if output_mode == "log":
-                        logging.error(failure_message)
-                    else:
-                        print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
+                        failure_message = f"Failed to set wallpaper to {wallpaper}"
+                        if output_mode == "log":
+                            logging.error(failure_message)
+                        else:
+                            print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
 
-                time.sleep(pause_seconds)
+                    time.sleep(pause_seconds)
+            else:
+                num_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
+                step = num_monitors
+                for start_idx in range(0, len(playlist), step):
+                    batch = [
+                        playlist[(start_idx + offset) % len(playlist)]
+                        for offset in range(num_monitors)
+                    ]
+                    existing_batch = [w for w in batch if Path(w).exists()]
+                    if not existing_batch:
+                        skip_message = f"Skipping missing wallpapers: {batch}"
+                        if output_mode == "log":
+                            logging.warning(skip_message)
+                        else:
+                            print(f"{YELLOW}{skip_message}{RESET}")
+                        continue
+
+                    while len(existing_batch) < num_monitors and existing_batch:
+                        existing_batch.append(existing_batch[0])
+
+                    operation_success, status_message = set_wallpaper_for_desktop(
+                        desktop_environment=desktop_environment,
+                        wallpaper_path=existing_batch,
+                        color_theme=color_theme,
+                    )
+
+                    if operation_success:
+                        if output_mode == "log":
+                            logging.info(status_message)
+                        else:
+                            print(f"{MAGENTA}{status_message}{RESET}")
+                    else:
+                        failure_message = f"Failed to set wallpapers across monitors: {existing_batch}"
+                        if output_mode == "log":
+                            logging.error(failure_message)
+                        else:
+                            print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
+
+                    time.sleep(pause_seconds)
 
             if not repetition:
                 completion_message = "Program exited after setting all wallpapers."
@@ -751,8 +1322,10 @@ def run_online_wallpaper_cycle(
     output_mode: str,
     color_theme: str | None = None,
     cache_dir: Path | None = None,
+    keep_last: int = DEFAULT_KEEP_LAST,
+    multi_monitor: bool = False,
 ) -> None:
-    """Cycle wallpapers from an online provider in a loop with error handling."""
+    """Cycle wallpapers from an online provider in a loop with error handling and cache cleanup."""
     provider_key = provider.lower()
     fetcher = ONLINE_PROVIDERS.get(provider_key)
     if fetcher is None:
@@ -761,38 +1334,95 @@ def run_online_wallpaper_cycle(
     target_cache_dir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
     target_cache_dir.mkdir(parents=True, exist_ok=True)
 
-    toggle_slot = 1
     try:
         while True:
-            cache_file = target_cache_dir / f"wallpaper_{provider_key}_{toggle_slot}.jpg"
             cycle_succeeded = False
             try:
-                if output_mode != "log":
-                    print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'...{RESET}")
+                if not multi_monitor:
+                    if output_mode != "log":
+                        print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'...{RESET}")
 
-                image_url = fetcher()
-                download_online_wallpaper(image_url, cache_file)
-                toggle_slot = 2 if toggle_slot == 1 else 1
+                    image_url = fetcher()
 
-                operation_success, status_message = set_wallpaper_for_desktop(
-                    desktop_environment=desktop_environment,
-                    wallpaper_path=cache_file,
-                    color_theme=color_theme,
-                )
+                    parsed_path = Path(urlparse(image_url).path).suffix.lower()
+                    extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
 
-                if operation_success:
-                    cycle_succeeded = True
-                    log_detail = f"Online wallpaper updated from {provider_key}: {image_url}"
-                    if output_mode == "log":
-                        logging.info(log_detail)
+                    timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
+                    random_identifier = random.randint(1000, 9999)
+                    cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}{extension}"
+
+                    download_online_wallpaper(image_url, cache_file)
+
+                    operation_success, status_message = set_wallpaper_for_desktop(
+                        desktop_environment=desktop_environment,
+                        wallpaper_path=cache_file,
+                        color_theme=color_theme,
+                    )
+
+                    if operation_success:
+                        cycle_succeeded = True
+                        log_detail = f"Online wallpaper updated from {provider_key}: {image_url}"
+                        if output_mode == "log":
+                            logging.info(log_detail)
+                        else:
+                            print(f"{MAGENTA}{status_message}{RESET}")
+
+                        pruned_files = cleanup_download_cache(target_cache_dir, keep_last=keep_last)
+                        if pruned_files and output_mode == "log":
+                            logging.info(
+                                f"Cleaned {len(pruned_files)} old cached wallpaper(s) (retaining last {keep_last})."
+                            )
                     else:
-                        print(f"{MAGENTA}{status_message}{RESET}")
+                        failure_message = f"Failed to set online wallpaper to desktop ({desktop_environment})."
+                        if output_mode == "log":
+                            logging.error(failure_message)
+                        else:
+                            print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
                 else:
-                    failure_message = f"Failed to set online wallpaper to desktop ({desktop_environment})."
-                    if output_mode == "log":
-                        logging.error(failure_message)
+                    num_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
+                    if output_mode != "log":
+                        print(
+                            f"{CYAN}[i] Fetching {num_monitors} online wallpapers from '{provider_key}' for multi-monitor...{RESET}"
+                        )
+
+                    cache_files: list[Path] = []
+                    urls: list[str] = []
+                    for mon_idx in range(num_monitors):
+                        image_url = fetcher()
+                        urls.append(image_url)
+                        parsed_path = Path(urlparse(image_url).path).suffix.lower()
+                        extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+                        timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
+                        random_identifier = random.randint(1000, 9999)
+                        cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}_m{mon_idx}{extension}"
+                        download_online_wallpaper(image_url, cache_file)
+                        cache_files.append(cache_file)
+
+                    operation_success, status_message = set_wallpaper_for_desktop(
+                        desktop_environment=desktop_environment,
+                        wallpaper_path=cache_files,
+                        color_theme=color_theme,
+                    )
+
+                    if operation_success:
+                        cycle_succeeded = True
+                        log_detail = f"Online wallpapers updated from {provider_key} across {num_monitors} monitors: {urls}"
+                        if output_mode == "log":
+                            logging.info(log_detail)
+                        else:
+                            print(f"{MAGENTA}{status_message}{RESET}")
+
+                        pruned_files = cleanup_download_cache(target_cache_dir, keep_last=keep_last)
+                        if pruned_files and output_mode == "log":
+                            logging.info(
+                                f"Cleaned {len(pruned_files)} old cached wallpaper(s) (retaining last {keep_last})."
+                            )
                     else:
-                        print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
+                        failure_message = f"Failed to set online wallpapers to desktop ({desktop_environment})."
+                        if output_mode == "log":
+                            logging.error(failure_message)
+                        else:
+                            print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
 
             except (URLError, HTTPError, TimeoutError, ConnectionError, OSError, ValueError) as network_error:
                 error_details = format_network_error(provider_key, network_error)
@@ -842,13 +1472,16 @@ def show_auto_start_failure_and_exit() -> None:
     sys.exit(1)
 
 
-def setup_auto_start_service(
+def setup_install_autostart_service(
     desktop_override: str | None = None,
     color_theme: str | None = None,
     initial_photo_path: Path | None = None,
     online_provider: str | None = None,
     shuffle: bool = False,
     recursive: bool = False,
+    keep_last: int | None = None,
+    config_settings: dict[str, object] | None = None,
+    multi_monitor: bool = False,
 ) -> None:
     """Interactive wizard to generate and install a systemd unit via sudo tee."""
     click.secho(
@@ -861,18 +1494,30 @@ def setup_auto_start_service(
         click.secho("Error: 'systemctl' command not found on this machine.", fg="red", err=True)
         show_auto_start_failure_and_exit()
 
+    settings_dict = config_settings or {}
+    default_pause = DEFAULT_PAUSE_SECONDS
+    if "pause" in settings_dict and settings_dict["pause"] is not None:
+        try:
+            default_pause = parse_duration_to_seconds(settings_dict["pause"])
+        except ValueError:
+            default_pause = DEFAULT_PAUSE_SECONDS
+
     pause_seconds = click.prompt(
         f"{GREEN}[+] Enter pause duration between changing wallpapers (e.g. 60, 10m, 1h){RESET}",
         type=DURATION_TYPE,
-        default=DEFAULT_PAUSE_SECONDS,
+        default=default_pause,
         show_default=True,
     )
 
     chosen_directory: Path | None = None
     if online_provider is None:
-        default_directory = (
-            initial_photo_path if initial_photo_path is not None else DEFAULT_WALLPAPERS_DIR
-        )
+        default_directory = DEFAULT_WALLPAPERS_DIR
+        if initial_photo_path is not None:
+            default_directory = initial_photo_path
+        elif "folder" in settings_dict and settings_dict["folder"]:
+            cfg_folder = Path(os.path.expanduser(str(settings_dict["folder"])))
+            if cfg_folder.exists() and cfg_folder.is_dir():
+                default_directory = cfg_folder
 
         while True:
             chosen_directory = click.prompt(
@@ -896,6 +1541,11 @@ def setup_auto_start_service(
     output_mode = "log"
 
     desktop_environment = desktop_override
+    if desktop_environment is None and "desktop" in settings_dict:
+        cfg_desktop = str(settings_dict["desktop"]).strip().lower()
+        if cfg_desktop and cfg_desktop != "auto":
+            desktop_environment = cfg_desktop
+
     if desktop_environment is None:
         desktop_environment = detect_desktop_environment()
 
@@ -909,7 +1559,7 @@ def setup_auto_start_service(
         else:
             click.secho(
                 "Error: Could not auto-detect your desktop environment (GNOME, Cinnamon, KDE Plasma, XFCE, MATE, or LXQt).\n"
-                "Please explicitly pass --gnome, --cinnamon, --kde, --xfce, --mate, or --lxqt when running --auto-start.",
+                "Please explicitly pass --gnome, --cinnamon, --kde, --xfce, --mate, or --lxqt when running --install-autostart.",
                 fg="red",
                 bold=True,
                 err=True,
@@ -938,8 +1588,12 @@ def setup_auto_start_service(
         command_tokens.append("-s")
     if recursive:
         command_tokens.append("-R")
+    if multi_monitor:
+        command_tokens.append("--multi-monitor")
     if online_provider:
         command_tokens.extend(["--online", online_provider.lower()])
+        if keep_last is not None:
+            command_tokens.extend(["--keep-last", str(keep_last)])
     elif chosen_directory is not None:
         command_tokens.append(str(chosen_directory.resolve()))
 
@@ -1030,7 +1684,9 @@ WantedBy=graphical.target
     sys.exit(0)
 
 
-setup_auto_start = setup_auto_start_service
+setup_auto_start_service = setup_install_autostart_service
+setup_auto_start = setup_install_autostart_service
+setup_install_autostart = setup_install_autostart_service
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -1051,7 +1707,7 @@ setup_auto_start = setup_auto_start_service
 @click.option(
     "--theme",
     "-t",
-    type=click.Choice(["dark", "light"], case_sensitive=False),
+    type=click.Choice(["dark", "light", "both"], case_sensitive=False),
     default=None,
     help=(
         "By default, the script updates both dark and light themes. "
@@ -1113,18 +1769,29 @@ setup_auto_start = setup_auto_start_service
     help="Fetch wallpapers online from a provider (wallhaven, bing, picsum, loremflickr).",
 )
 @click.option(
-    "--shuffle",
+    "--source",
+    type=click.Choice(["folder", "local", *ONLINE_PROVIDER_CHOICES], case_sensitive=False),
+    default=None,
+    help="Wallpaper source: local 'folder' or online provider ('wallhaven', 'bing', 'picsum', 'loremflickr').",
+)
+@click.option(
+    "--shuffle/--no-shuffle",
     "-s",
-    is_flag=True,
     default=False,
     help="Shuffle wallpapers randomly instead of cycling in folder order.",
 )
 @click.option(
-    "--recursive",
+    "--recursive/--no-recursive",
     "-R",
-    is_flag=True,
     default=False,
     help="Search for images recursively in subfolders.",
+)
+@click.option(
+    "--multi-monitor/--single-monitor",
+    "-m",
+    "multi_monitor",
+    default=False,
+    help="Set different wallpapers on each connected monitor/screen.",
 )
 @click.option(
     "--run-background",
@@ -1134,10 +1801,32 @@ setup_auto_start = setup_auto_start_service
     help="Run the wallpaper changer in the background detached from the terminal.",
 )
 @click.option(
+    "--install-autostart",
     "--auto-start",
+    "install_autostart",
     is_flag=True,
     default=False,
-    help="Interactively configure and install a systemd startup service with root privileges.",
+    help="Interactively configure and install a startup service so the changer runs every time the user signs in.",
+)
+@click.option(
+    "--keep-last",
+    type=click.IntRange(min=1),
+    default=None,
+    help=f"Maximum number of downloaded online wallpapers to retain in cache before cleanup (default: {DEFAULT_KEEP_LAST}).",
+)
+@click.option(
+    "--config",
+    "-c",
+    "config_file",
+    type=click.Path(dir_okay=False, resolve_path=True, path_type=Path),
+    default=None,
+    help="Path to a custom TOML configuration file.",
+)
+@click.option(
+    "--no-config",
+    is_flag=True,
+    default=False,
+    help="Disable loading settings from config.toml.",
 )
 @click.argument(
     "photo_path",
@@ -1145,18 +1834,25 @@ setup_auto_start = setup_auto_start_service
     required=False,
     default=None,
 )
+@click.pass_context
 def cli(
+    ctx: click.Context,
     pause: int | None,
     repetition: bool,
     theme: str | None,
     output: str,
     desktop_override: str | None,
     online: str | None,
+    source: str | None,
     shuffle: bool,
     recursive: bool,
     run_background: bool,
-    auto_start: bool,
+    install_autostart: bool,
+    keep_last: int | None,
+    config_file: Path | None,
+    no_config: bool,
     photo_path: Path | None,
+    multi_monitor: bool = False,
 ) -> None:
     """Awesome Wallpaper Changer (wchanger).
 
@@ -1164,15 +1860,109 @@ def cli(
     Desktop environment is auto-detected by default. Use --gnome, --cinnamon, --kde, --xfce, --mate, or --lxqt
     to manually override detection.
     """
-    if auto_start:
-        setup_auto_start_service(
+    config_settings: dict[str, object] = {}
+    if not no_config:
+        config_settings = load_config_file(config_file)
+
+    if desktop_override is None and "desktop" in config_settings:
+        config_desktop = str(config_settings["desktop"]).strip().lower()
+        if config_desktop and config_desktop != "auto":
+            desktop_override = config_desktop
+
+    pause_from_cli = ctx.get_parameter_source("pause") == click.core.ParameterSource.COMMANDLINE
+    if not pause_from_cli and "pause" in config_settings and config_settings["pause"] is not None:
+        try:
+            pause = parse_duration_to_seconds(config_settings["pause"])
+        except ValueError as error:
+            click.secho(
+                f"[!] Warning: Invalid 'pause' in config: {error}. Using default {DEFAULT_PAUSE_SECONDS}s.",
+                fg="yellow",
+                err=True,
+            )
+            pause = DEFAULT_PAUSE_SECONDS
+
+    repetition_from_cli = ctx.get_parameter_source("repetition") == click.core.ParameterSource.COMMANDLINE
+    if not repetition_from_cli and "repetition" in config_settings:
+        repetition = bool(config_settings["repetition"])
+
+    bg_from_cli = ctx.get_parameter_source("run_background") == click.core.ParameterSource.COMMANDLINE
+    if not bg_from_cli and "run_background" in config_settings:
+        run_background = bool(config_settings["run_background"])
+
+    theme_from_cli = ctx.get_parameter_source("theme") == click.core.ParameterSource.COMMANDLINE
+    if not theme_from_cli and "theme" in config_settings:
+        config_theme = str(config_settings["theme"]).strip().lower()
+        if config_theme in ("dark", "light"):
+            theme = config_theme
+        elif config_theme in ("both", "all"):
+            theme = None
+
+    output_from_cli = ctx.get_parameter_source("output") == click.core.ParameterSource.COMMANDLINE
+    if not output_from_cli and "output" in config_settings:
+        config_output = str(config_settings["output"]).strip().lower()
+        if config_output in ("console", "log"):
+            output = config_output
+
+    shuffle_from_cli = ctx.get_parameter_source("shuffle") == click.core.ParameterSource.COMMANDLINE
+    if not shuffle_from_cli and "shuffle" in config_settings:
+        shuffle = bool(config_settings["shuffle"])
+
+    recursive_from_cli = ctx.get_parameter_source("recursive") == click.core.ParameterSource.COMMANDLINE
+    if not recursive_from_cli and "recursive" in config_settings:
+        recursive = bool(config_settings["recursive"])
+
+    multi_monitor_from_cli = ctx.get_parameter_source("multi_monitor") == click.core.ParameterSource.COMMANDLINE
+    if not multi_monitor_from_cli and "multi_monitor" in config_settings:
+        multi_monitor = bool(config_settings["multi_monitor"])
+
+    keep_last_from_cli = ctx.get_parameter_source("keep_last") == click.core.ParameterSource.COMMANDLINE
+    if not keep_last_from_cli and "keep_last" in config_settings:
+        try:
+            keep_last = int(config_settings["keep_last"])
+        except (ValueError, TypeError):
+            keep_last = DEFAULT_KEEP_LAST
+    if keep_last is None:
+        keep_last = DEFAULT_KEEP_LAST
+
+    custom_cache_dir: Path | None = None
+    if "cache_dir" in config_settings:
+        custom_cache_dir = Path(os.path.expanduser(str(config_settings["cache_dir"])))
+
+    photo_path_from_cli = ctx.get_parameter_source("photo_path") == click.core.ParameterSource.COMMANDLINE
+    online_from_cli = ctx.get_parameter_source("online") == click.core.ParameterSource.COMMANDLINE
+    source_from_cli = ctx.get_parameter_source("source") == click.core.ParameterSource.COMMANDLINE
+
+    effective_online_provider: str | None = None
+    if photo_path_from_cli:
+        effective_online_provider = None
+    elif online_from_cli and online:
+        effective_online_provider = online.lower()
+    elif source_from_cli and source:
+        source_normalized = source.lower()
+        if source_normalized in ("folder", "local"):
+            effective_online_provider = None
+        else:
+            effective_online_provider = source_normalized
+    elif "source" in config_settings:
+        config_source = str(config_settings["source"]).strip().lower()
+        if config_source in ONLINE_PROVIDER_CHOICES:
+            effective_online_provider = config_source
+        elif config_source in ("folder", "local"):
+            effective_online_provider = None
+
+    if install_autostart:
+        setup_install_autostart_service(
             desktop_override=desktop_override,
             color_theme=theme,
             initial_photo_path=photo_path,
-            online_provider=online,
+            online_provider=effective_online_provider,
             shuffle=shuffle,
             recursive=recursive,
+            keep_last=keep_last,
+            config_settings=config_settings,
+            multi_monitor=multi_monitor,
         )
+        return
 
     desktop_environment = desktop_override
     if desktop_environment is None:
@@ -1210,8 +2000,8 @@ def cli(
             err=True,
         )
 
-    if online is not None:
-        online_provider = online.lower()
+    if effective_online_provider is not None:
+        online_provider = effective_online_provider
         if run_background:
             try:
                 child_pid = os.fork()
@@ -1267,6 +2057,9 @@ def cli(
                 repetition=repetition,
                 output_mode=output,
                 color_theme=theme,
+                cache_dir=custom_cache_dir,
+                keep_last=keep_last,
+                multi_monitor=multi_monitor,
             )
             sys.exit(0)
 
@@ -1278,6 +2071,9 @@ def cli(
             + f"{RESET}"
         )
         print(f"{CYAN}[i] Wallpaper source: online provider '{online_provider}'{RESET}")
+        if multi_monitor:
+            eff_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
+            print(f"{CYAN}[i] Multi-monitor: enabled ({eff_monitors} displays){RESET}")
 
         run_online_wallpaper_cycle(
             desktop_environment=desktop_environment,
@@ -1286,19 +2082,41 @@ def cli(
             repetition=repetition,
             output_mode=output,
             color_theme=theme,
+            cache_dir=custom_cache_dir,
+            keep_last=keep_last,
+            multi_monitor=multi_monitor,
         )
         return
 
-    selected_folder = photo_path if photo_path is not None else DEFAULT_WALLPAPERS_DIR
+    selected_folder: Path
+    from_config = False
+
+    if photo_path is not None:
+        selected_folder = photo_path
+    elif "folder" in config_settings and config_settings["folder"]:
+        configured_path = Path(os.path.expanduser(str(config_settings["folder"])))
+        selected_folder = configured_path
+        from_config = True
+    else:
+        selected_folder = DEFAULT_WALLPAPERS_DIR
 
     if not selected_folder.exists() or not selected_folder.is_dir():
-        click.secho(
-            f"Error: Wallpaper directory '{selected_folder}' does not exist or is not a folder.",
-            fg="red",
-            bold=True,
-            err=True,
-        )
-        sys.exit(1)
+        if from_config and DEFAULT_WALLPAPERS_DIR.exists():
+            click.secho(
+                f"[!] Warning: Configured wallpaper folder '{selected_folder}' does not exist. "
+                f"Falling back to default '{DEFAULT_WALLPAPERS_DIR}'.",
+                fg="yellow",
+                err=True,
+            )
+            selected_folder = DEFAULT_WALLPAPERS_DIR
+        else:
+            click.secho(
+                f"Error: Wallpaper directory '{selected_folder}' does not exist or is not a folder.",
+                fg="red",
+                bold=True,
+                err=True,
+            )
+            sys.exit(1)
 
     discovered_wallpapers = file_validator(selected_folder, recursive=recursive)
     if not discovered_wallpapers:
@@ -1323,6 +2141,8 @@ def cli(
                 flags_desc.append("shuffle")
             if recursive:
                 flags_desc.append("recursive")
+            if multi_monitor:
+                flags_desc.append("multi-monitor")
             extra_str = f" | Flags: {', '.join(flags_desc)}" if flags_desc else ""
             click.secho(
                 f"[+] Awesome Wallpaper Changer started in background (PID: {child_pid}).\n"
@@ -1372,6 +2192,7 @@ def cli(
             output_mode=output,
             color_theme=theme,
             shuffle=shuffle,
+            multi_monitor=multi_monitor,
         )
         sys.exit(0)
 
@@ -1386,6 +2207,9 @@ def cli(
         print(f"{CYAN}[i] Shuffle: enabled{RESET}")
     if recursive:
         print(f"{CYAN}[i] Recursive scan: enabled{RESET}")
+    if multi_monitor:
+        eff_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
+        print(f"{CYAN}[i] Multi-monitor: enabled ({eff_monitors} displays){RESET}")
 
     run_wallpaper_cycle(
         desktop_environment=desktop_environment,
@@ -1395,12 +2219,11 @@ def cli(
         output_mode=output,
         color_theme=theme,
         shuffle=shuffle,
+        multi_monitor=multi_monitor,
     )
 
 
-def main() -> None:
-    """Run CLI."""
-    cli()
+main = cli
 
 
 if __name__ == "__main__":

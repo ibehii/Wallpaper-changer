@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wchanger"
+version = "3.0.0"
+description = "Awesome Wallpaper Changer - automatic wallpaper rotator for Linux desktop environments"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Behnam" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: X11 Applications",
+    "Topic :: Desktop Environment",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "click>=8.0.0",
+    "colorama>=0.4.6",
+    "Pillow>=9.0.0",
+    "requests>=2.25.0",
+    'tomli>=1.1.0; python_version < "3.11"',
+]
+
+[project.scripts]
+wchanger = "wchanger:main"
+
+[tool.setuptools]
+py-modules = ["wchanger"]

@@ -10,18 +10,25 @@ An automated, lightweight desktop wallpaper rotator for Linux (GNOME, Cinnamon, 
 
 ## What It Does
 
-**Awesome Wallpaper Changer** cycles through a directory of image files and automatically sets them as your desktop wallpaper at a configurable interval. It automatically detects your desktop environment (**GNOME**, **Cinnamon**, **KDE Plasma**, **XFCE**, **MATE**, or **LXQt**), integrating natively using:
+**Awesome Wallpaper Changer** (`wchanger`) cycles through a directory of image files or online providers and automatically sets them as your desktop wallpaper at a configurable interval. It automatically detects your desktop environment (**GNOME**, **Cinnamon**, **KDE Plasma**, **XFCE**, **MATE**, or **LXQt**), integrating natively using:
 - `gsettings` for **GNOME**, **Cinnamon**, and **MATE**
 - D-Bus (`qdbus`) PlasmaShell scripting for **KDE Plasma**
 - `xfconf-query` backdrop properties for **XFCE**
 - `pcmanfm-qt` for **LXQt**
 
-Designed to be lightweight and robust, it can run interactively in your terminal, detached in the background, or as an automatic system service on boot.
+It supports both single-monitor setups and multi-monitor setups with different wallpapers per display. Designed to be lightweight and robust, it can run interactively as a CLI command (`wchanger`), detached in the background, or as an automatic system service on boot.
 
 ---
 
 ## Features
 
+- **System-Wide CLI Command (`wchanger`):** Installable directly via `pip` or `pipx` into standard system PATH locations (`/usr/local/bin`, `/bin`, or `~/.local/bin`) with `pyproject.toml` console script entry point.
+- **Multi-Monitor Wallpaper Support (`--multi-monitor` / `-m`):** Set different wallpapers on each connected monitor simultaneously:
+  - **KDE Plasma:** Native per-screen assignment via PlasmaShell scripting (`desktops()` containment indexing).
+  - **XFCE:** Native per-monitor property assignment via `xfconf-query`.
+  - **GNOME, Cinnamon & MATE:** Automatic panoramic wallpaper stitching based on `xrandr` screen coordinates and Pillow (`picture-options = spanned`).
+  - **LXQt:** Multi-screen desktop profile management (`[Desktop_Screen_X]`) in `settings.conf`.
+  - Works with local image folders as well as online wallpaper providers.
 - **Automatic Desktop Detection:** Automatically senses whether you are using GNOME, Cinnamon, KDE Plasma, XFCE, MATE, or LXQt.
 - **Manual Desktop Override:** Easily override detection using `--gnome`, `--cinnamon`, `--kde`, `--xfce`, `--mate`, or `--lxqt` if needed.
 - **Native Desktop Integration:**
@@ -29,14 +36,16 @@ Designed to be lightweight and robust, it can run interactively in your terminal
   - **XFCE:** Updates backdrop properties across screens and workspaces using `xfconf-query`.
   - **MATE:** Configures desktop background seamlessly using `gsettings` (`org.mate.background`).
   - **LXQt:** Updates wallpaper on the desktop shell using `pcmanfm-qt`.
-- **Automatic Service Installation (`--auto-start`):** An interactive wizard that configures, installs, and enables a systemd startup service with root privileges across all supported desktops.
-- **Background Mode (`--run-background`):** Spawns a detached daemon process, requires no user input, outputs nothing to the terminal, and exits immediately.
+- **Start at Login (`--install-autostart`):** An interactive wizard that configures, installs, and enables a systemd startup service so the wallpaper changer runs automatically every time you sign in (legacy `--auto-start` also supported).
+- **Persistent Configuration File (`config.toml`):** Save default directories, intervals, desktop modes, online sources, multi-monitor preferences, and shuffle settings next to `wchanger.py` (or in `~/.config/wchanger/config.toml`) so you never have to retype options.
+- **Download Cache & Auto-Cleanup:** Online wallpapers are cached locally in `~/.cache/wchanger/`, retaining only the most recent 20 downloads (configurable via `keep_last` in `config.toml` or `--keep-last`) to avoid eating up disk space.
+- **Background Mode (`--run-background` / `-b`):** Spawns a detached daemon process, requires no user input, outputs nothing to the terminal, and exits immediately.
 - **GNOME Theme Awareness:** Switch wallpapers for light mode (`picture-uri`), dark mode (`picture-uri-dark`), or both simultaneously.
 - **Automated Cycling:** Rotates through all supported pictures in a folder with a custom pause duration.
 - **Safe Execution:** Uses direct `subprocess.run` list execution (no shell injection risks) and generates RFC-compliant `file:///` URIs and clean paths that properly handle spaces and special characters.
 - **Resource Efficient:** Validates images once during initialization, avoiding redundant filesystem rescans, busy-waiting, or CPU lockups.
 - **Robust Error Handling:** Skips corrupt or unreadable files, prevents freezes on empty folders, and exits cleanly upon pressing `Ctrl+C`.
-- **Online Wallpaper Sources (`--online`):** Fetch stunning wallpapers directly from popular online providers without needing local image files:
+- **Online Wallpaper Sources (`--online` / `--source`):** Fetch stunning wallpapers directly from popular online providers without needing local image files:
   - **Wallhaven (`wallhaven`):** Real top-rated wallpapers from Wallhaven (`1920x1080+`).
   - **Bing Daily Image (`bing`):** Microsoft Bing's daily curated wallpaper photo.
   - **Picsum (`picsum`):** Random high-resolution photography from Lorem Picsum.
@@ -65,32 +74,78 @@ Designed to be lightweight and robust, it can run interactively in your terminal
   - **For XFCE:** `xfconf-query`
     - *Debian/Ubuntu:* `sudo apt install xfconf`
     - *Fedora:* `sudo dnf install xfconf`
-    - *Arch Linux:* `sudo pacman -S xfconf`
   - **For LXQt:** `pcmanfm-qt`
     - *Debian/Ubuntu:* `sudo apt install pcmanfm-qt`
     - *Fedora:* `sudo dnf install pcmanfm-qt`
     - *Arch Linux:* `sudo pacman -S pcmanfm-qt`
-- **Python Dependencies:** `click`, `colorama`, `Pillow` (listed in `requirements.txt`)
+  - **For Multi-Monitor Display Geometry Detection:** `xrandr` (standard on X11 desktop environments)
+    - *Debian/Ubuntu:* `sudo apt install x11-xserver-utils`
+    - *Fedora:* `sudo dnf install xrandr`
+    - *Arch Linux:* `sudo pacman -S xorg-xrandr`
+- **Python Dependencies:** `click`, `colorama`, `Pillow`, `requests` (listed in `requirements.txt` and `pyproject.toml`)
 
 ---
 
 ## Installation
 
-Follow these steps to clone and set up the project:
+You can install `wchanger` as a real system command or run it directly from source.
+
+### Option 1: Install as a System Command (Recommended)
+
+Installing `wchanger` creates the executable console script `wchanger` in your PATH so you can run it like a normal command from any directory:
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/ibehii/Wallpaper-changer.git
-
-# 2. Navigate to the project directory
 cd Wallpaper-changer
 
-# 3. (Optional but recommended) Create and activate a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# 2. Install using the one-line installer script (installs and links to /bin/wchanger):
+sudo ./install.sh
 
-# 4. Install the required Python packages
+# Or using Make:
+sudo make install-bin
+
+# Or install via pip:
+pip install .
+```
+
+> **Tip:** If installing with `pip install --user .`, ensure `~/.local/bin` is in your shell `PATH` (add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc` or `~/.zshrc`).
+
+#### Installing Directly to `/bin`
+To make `wchanger` accessible system-wide across all users in `/bin` or `/usr/local/bin`:
+```bash
+# Method A: Automatic installer script
+sudo ./install.sh
+
+# Method B: Makefile
+sudo make install-bin
+
+# Method C: Direct symlink after pip install
+sudo ln -sf $(which wchanger) /bin/wchanger
+# or
+sudo ln -sf $(which wchanger) /usr/local/bin/wchanger
+
+# Method D: System-wide install with /usr prefix
+sudo pip install --prefix=/usr .
+```
+
+#### Isolated Installation with `pipx`
+If you prefer keeping Python CLI utilities isolated:
+```bash
+pipx install .
+sudo ln -sf $(which wchanger) /bin/wchanger
+```
+
+---
+
+### Option 2: Run Directly from Source
+
+If you prefer running without installing the package:
+```bash
+git clone https://github.com/ibehii/Wallpaper-changer.git
+cd Wallpaper-changer
 pip install -r requirements.txt
+python wchanger.py
 ```
 
 ---
@@ -101,11 +156,17 @@ Awesome Wallpaper Changer uses a simple, single-command interface. It automatica
 
 ### Command Syntax
 
+If installed as a system command:
+```bash
+wchanger [OPTIONS] [PHOTO_PATH]
+```
+
+Or if running directly from source:
 ```bash
 python wchanger.py [OPTIONS] [PHOTO_PATH]
 ```
 
-> **Note:** If `PHOTO_PATH` is omitted, the script defaults to the bundled `photos/` directory in the repository.
+> **Note:** If `PHOTO_PATH` is omitted, the script defaults to the bundled `photos/` directory in the repository (or `folder` specified in `config.toml`).
 
 ---
 
@@ -130,17 +191,19 @@ python wchanger.py [OPTIONS] [PHOTO_PATH]
 
 ---
 
-#### 2. Automatic Startup Service Setup (`--auto-start`)
+#### 2. Start at Login / Automatic Startup Service (`--install-autostart`)
 
-Run the interactive wizard to automatically create and enable a systemd service that starts the wallpaper changer on boot:
+Run the interactive wizard to automatically create and enable a systemd service that starts the wallpaper changer every time you sign in:
 
 ```bash
-python wchanger.py --auto-start
+python wchanger.py --install-autostart
 ```
 
+*(Note: Legacy `--auto-start` is maintained as a direct alias).*
+
 The wizard will:
-1. Ask you for the pause duration (in seconds).
-2. Ask you for the folder containing your wallpapers.
+1. Ask you for the pause duration (e.g. `60`, `10m`, `1h`).
+2. Ask you for the folder containing your wallpapers (or use your online provider).
 3. Automatically configure logging to file (`-o log` $\rightarrow$ `info.log`).
 4. Request administrator privileges (`sudo`) to install and enable `wallpaper-changer.service` under systemd.
 5. In case of any error (e.g., cancelled `sudo`), it directs you to the manual setup instructions below.
@@ -273,18 +336,160 @@ Fetch wallpapers dynamically from online providers without needing local image f
 
 ---
 
+#### 8. Configuration File & Download Cache Cleanup
+
+- **Zero-typing run using settings from `config.toml`:**
+  ```bash
+  python wchanger.py
+  ```
+
+- **Run with a custom configuration file:**
+  ```bash
+  python wchanger.py --config /path/to/my_config.toml
+  ```
+
+- **Bypass `config.toml` completely and use standard CLI arguments:**
+  ```bash
+  python wchanger.py --no-config -p 30 /home/user/Pictures
+  ```
+
+- **Online wallpapers with custom cache retention (keep last 10 images):**
+  ```bash
+  python wchanger.py --online wallhaven --keep-last 10
+  ```
+
+- **Install startup service with custom online source:**
+  ```bash
+  python wchanger.py --install-autostart --source bing
+  ```
+
+---
+
+#### 9. Multi-Monitor Wallpaper Mode (`-m` / `--multi-monitor`)
+
+When multiple displays are connected, `wchanger` can automatically detect your monitors and assign distinct, different wallpapers to each screen instead of duplicating the same image everywhere.
+
+- **Set different wallpapers on each screen from a local folder:**
+  ```bash
+  wchanger -m -p 60 /home/user/Pictures/Wallpapers
+  ```
+
+- **Rotate different online wallpapers per display every 5 minutes:**
+  ```bash
+  wchanger -m --online wallhaven -p 5m
+  ```
+
+- **Fetch Bing daily wallpapers across multiple displays:**
+  ```bash
+  wchanger -m --online bing
+  ```
+
+- **Temporarily disable multi-monitor mode if `multi_monitor = true` is set in `config.toml`:**
+  ```bash
+  wchanger --single-monitor -p 60 /home/user/Pictures/Wallpapers
+  ```
+
+- **Install an autostart startup service with multi-monitor enabled:**
+  ```bash
+  wchanger -m --install-autostart
+  ```
+
+##### Desktop Environment Implementation:
+- **KDE Plasma:** Natively assigns different wallpapers to each display by querying Plasma containments via D-Bus (`qdbus`) and setting per-desktop configuration scripts.
+- **XFCE:** Identifies all active monitors (`screen0/monitor0`, `screen0/monitor1`, etc.) via `xfconf-query` and assigns wallpapers independently to each display and workspace.
+- **GNOME, Cinnamon & MATE:** Queries display resolutions and physical geometries via `xrandr`, stitches separate wallpapers side-by-side into a single high-resolution panoramic canvas using Pillow, and sets `picture-options = 'spanned'`.
+- **LXQt:** Discovers connected screen counts and configures individual desktop entries (`[Desktop_Screen_0]`, `[Desktop_Screen_1]`, etc.) in `~/.config/pcmanfm-qt/lxqt/settings.conf`, falling back to spanned mode if required.
+
+---
+
+## Configuration File (`config.toml`)
+
+Awesome Wallpaper Changer automatically loads settings from `config.toml` located in the same directory as `wchanger.py` (or `~/.config/wchanger/config.toml`). This allows you to configure your preferred folder, timing, desktop environment, multi-monitor preferences, and sources without having to type command-line flags every time.
+
+### Example `config.toml`
+
+```toml
+# =====================================================================
+# Awesome Wallpaper Changer (wchanger) - Configuration File
+# =====================================================================
+# Place this file as 'config.toml' next to wchanger.py or in ~/.config/wchanger/config.toml.
+# Command-line flags always take precedence over options defined here.
+
+# Target directory containing local wallpapers (used when source = "folder")
+folder = "~/Pictures/wallpapers"
+
+# Desktop environment: "auto", "gnome", "cinnamon", "kde", "xfce", "mate", or "lxqt"
+desktop = "auto"
+
+# Pause duration between wallpaper changes (seconds or duration string like "10m", "1h", "45s")
+pause = 600
+
+# Loop continuously (true) or exit after cycling through all images once (false)
+repetition = true
+
+# GNOME theme target: "both", "dark", or "light" (applies only to GNOME)
+theme = "both"
+
+# Output mode: "console" (terminal text) or "log" (timestamped info.log file)
+output = "console"
+
+# Randomize wallpaper display order instead of cycling in folder order
+shuffle = true
+
+# Search for wallpapers recursively across subfolders
+recursive = false
+
+# Wallpaper source: "folder" for local images, or "wallhaven", "bing", "picsum", "loremflickr"
+source = "wallhaven"
+
+# Maximum number of downloaded online wallpapers to retain in cache
+keep_last = 20
+
+# Run in background detached from terminal (true/false)
+run_background = false
+
+# Set different wallpapers across multiple connected monitors (true/false)
+multi_monitor = false
+```
+
+### Configuration Keys Reference
+
+| Key | Value Type | Example | Description |
+| :--- | :--- | :--- | :--- |
+| `folder` | String (Path) | `"~/Pictures/wallpapers"` | Target directory containing local images. |
+| `desktop` | String | `"auto"`, `"kde"`, `"gnome"` | Target desktop environment (or auto-detect). |
+| `pause` | Integer or String | `600`, `"10m"`, `"1h"` | Interval between wallpaper changes. |
+| `repetition` | Boolean | `true`, `false` | Loop indefinitely (`true`) or exit after one pass (`false`). |
+| `theme` | String | `"both"`, `"dark"`, `"light"` | GNOME appearance target (dark/light/both). |
+| `output` | String | `"console"`, `"log"` | Output destination (terminal or `info.log`). |
+| `shuffle` | Boolean | `true`, `false` | Randomize playback order. |
+| `recursive` | Boolean | `false`, `true` | Scan subfolders recursively. |
+| `source` | String | `"folder"`, `"wallhaven"`, `"bing"`, `"picsum"` | Wallpaper source mode. |
+| `keep_last` | Integer | `20` | Max downloaded online images to retain in cache before pruning. |
+| `run_background` | Boolean | `false`, `true` | Launch silently as background daemon. |
+| `multi_monitor` | Boolean | `false`, `true` | Set different wallpapers on each connected display/monitor. |
+
+> **Precedence Rule:** Command-line flags always take priority over settings in `config.toml`. For example, running `python wchanger.py -p 30` will use a 30-second interval even if `pause = 600` is defined in `config.toml`.
+
+---
+
 ## Options and Arguments Reference
 
 ### Options
 
 | Option | Short Flag | Accepted Values | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--pause` | `-p` | Duration string (e.g. `30s`, `10m`, `1h`, `1d`, `1h30m`, `1.5h`, `60`) | `60` *(Interactive prompt if foreground)* | Duration between wallpaper changes using human units. |
-| `--shuffle` | `-s` | Flag | `False` | Shuffle wallpapers randomly instead of cycling in folder order. |
-| `--recursive` | `-R` | Flag | `False` | Search for images recursively in subfolders. |
-| `--online` | | `wallhaven`, `bing`, `picsum`, `loremflickr` | `None` *(Uses local photos)* | Fetch wallpapers online from a provider. |
-| `--auto-start` | | Flag | `False` | Interactively configure and install a systemd startup service with root privileges. |
-| `--run-background` | `-b` | Flag | `False` | Run detached in the background with no terminal output or prompts. |
+| `--pause` | `-p` | Duration string (e.g. `30s`, `10m`, `1h`, `1d`, `1h30m`, `1.5h`, `60`) | `60` *(or config)* | Duration between wallpaper changes using human units. |
+| `--shuffle` / `--no-shuffle` | `-s` | Flag | `False` *(or config)* | Shuffle wallpapers randomly instead of cycling in folder order. |
+| `--recursive` / `--no-recursive` | `-R` | Flag | `False` *(or config)* | Search for images recursively in subfolders. |
+| `--multi-monitor` / `--single-monitor` | `-m` | Flag | `False` *(or config)* | Set different wallpapers on each connected monitor/screen. |
+| `--online` | | `wallhaven`, `bing`, `picsum`, `loremflickr` | `None` | Fetch wallpapers online from a provider. |
+| `--source` | | `folder`, `wallhaven`, `bing`, `picsum`, `loremflickr` | `"folder"` *(or config)* | Choose local folder or online wallpaper source. |
+| `--keep-last` | | Integer $\ge 1$ | `20` *(or config)* | Maximum number of downloaded online wallpapers to retain in cache before cleanup. |
+| `--config` | `-c` | File path | `config.toml` | Path to a custom TOML configuration file. |
+| `--no-config` | | Flag | `False` | Disable loading settings from `config.toml`. |
+| `--install-autostart` | `--auto-start` | Flag | `False` | Interactively configure and install a startup service so the changer runs every time you sign in. |
+| `--run-background` | `-b` | Flag | `False` *(or config)* | Run detached in the background with no terminal output or prompts. |
 | `--gnome` | | Flag | Auto-detect | Manually override desktop environment to GNOME. |
 | `--cinnamon` | | Flag | Auto-detect | Manually override desktop environment to Cinnamon. |
 | `--kde` | `--plasma` | Flag | Auto-detect | Manually override desktop environment to KDE Plasma. |
@@ -292,37 +497,39 @@ Fetch wallpapers dynamically from online providers without needing local image f
 | `--mate` | | Flag | Auto-detect | Manually override desktop environment to MATE. |
 | `--lxqt` | | Flag | Auto-detect | Manually override desktop environment to LXQt. |
 | `--repetition` / `--no-repetition` | `-r` / `-nr` | Flag | `--repetition` | Loop continuously (`--repetition`) or exit after one pass (`--no-repetition`). |
-| `--theme` *(GNOME only)* | `-t` | `dark`, `light` | Both | Apply wallpaper changes to dark theme, light theme, or both. |
-| `--output` | `-o` | `console`, `log` | `console` | Display colorized progress in terminal or write timestamps to `info.log`. |
+| `--theme` *(GNOME only)* | `-t` | `dark`, `light`, `both` | `both` *(or config)* | Apply wallpaper changes to dark theme, light theme, or both. |
+| `--output` | `-o` | `console`, `log` | `console` *(or config)* | Display colorized progress in terminal or write timestamps to `info.log`. |
 | `--help` | `-h` | None | | Show command help message and available options. |
 
 ### Arguments
 
 | Argument | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `PHOTO_PATH` | Directory Path | No | `./photos` | Path to a folder containing supported images (`.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, `.svg`, `.tiff`). |
+| `PHOTO_PATH` | Directory Path | No | `./photos` *(or config)* | Path to a folder containing supported images (`.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, `.svg`, `.tiff`). |
 
 ---
 
 ## Starting on Boot (Systemd Startup Service)
 
-### Method 1: Automatic Setup via `--auto-start` (Recommended)
+### Method 1: Automatic Setup via `--install-autostart` (Recommended)
 
 Simply run:
 ```bash
-python wchanger.py --auto-start
+python wchanger.py --install-autostart
 ```
+*(Legacy `--auto-start` is also supported)*.
+
 Or with explicit desktop override (e.g. for XFCE, MATE, or LXQt):
 ```bash
-python wchanger.py --xfce --auto-start
+python wchanger.py --xfce --install-autostart
 ```
-Follow the interactive prompts to set your pause time and wallpapers folder, and enter your `sudo` password when requested. The wizard automatically configures user permissions, `WorkingDirectory`, session D-Bus addresses, and `DISPLAY` environment variables so all desktop tools (including Qt GUI tools like `pcmanfm-qt`) run seamlessly on login.
+Follow the interactive prompts to set your pause time and wallpapers folder, and enter your `sudo` password when requested. The wizard automatically configures user permissions, `WorkingDirectory`, session D-Bus addresses, and `DISPLAY` environment variables so all desktop tools (including Qt GUI tools like `pcmanfm-qt`) run seamlessly every time you sign in.
 
 ---
 
 ### Method 2: Manual Systemd Setup (Fallback)
 
-If the automatic `--auto-start` command failed or you prefer setting up the service manually:
+If the automatic `--install-autostart` command failed or you prefer setting up the service manually:
 
 1. Create a user systemd service directory:
    ```bash

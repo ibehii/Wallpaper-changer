@@ -1,0 +1,41 @@
+# =====================================================================
+# Awesome Wallpaper Changer (wchanger) - Configuration File
+# =====================================================================
+# Place this file as 'config.toml' next to wchanger.py or in ~/.config/wchanger/config.toml.
+# Command-line flags always take precedence over options defined here.
+
+# Target directory containing local wallpapers (used when source = "folder")
+folder = "~/Pictures/wallpapers"
+
+# Desktop environment: "auto", "gnome", "cinnamon", "kde", "xfce", "mate", or "lxqt"
+desktop = "auto"
+
+# Pause duration between wallpaper changes (seconds or duration string like "10m", "1h", "45s")
+pause = 600
+
+# Loop continuously (true) or exit after cycling through all images once (false)
+repetition = true
+
+# GNOME theme target: "both", "dark", or "light" (applies only to GNOME)
+theme = "both"
+
+# Output mode: "console" (terminal text) or "log" (timestamped info.log file)
+output = "console"
+
+# Randomize wallpaper display order instead of cycling in folder order
+shuffle = true
+
+# Search for wallpapers recursively across subfolders
+recursive = false
+
+# Wallpaper source: "folder" for local images, or "wallhaven", "bing", "picsum", "loremflickr"
+source = "wallhaven"
+
+# Maximum number of downloaded online wallpapers to retain in cache
+keep_last = 20
+
+# Run in background detached from terminal (true/false)
+run_background = false
+
+# Set different wallpapers across multiple connected monitors (true/false)
+multi_monitor = false
