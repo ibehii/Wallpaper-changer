@@ -1843,6 +1843,224 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertIn("--gnome", written_service_content)
 
 
+    # Duration Parsing Tests
+    def test_parse_duration_plain_numbers(self) -> None:
+        """parse_duration_to_seconds should parse integer numbers and numeric strings."""
+        self.assertEqual(wchanger.parse_duration_to_seconds(60), 60)
+        self.assertEqual(wchanger.parse_duration_to_seconds(1), 1)
+        self.assertEqual(wchanger.parse_duration_to_seconds("60"), 60)
+        self.assertEqual(wchanger.parse_duration_to_seconds("300"), 300)
+
+    def test_parse_duration_units(self) -> None:
+        """parse_duration_to_seconds should parse s, m, h, d units correctly."""
+        self.assertEqual(wchanger.parse_duration_to_seconds("45s"), 45)
+        self.assertEqual(wchanger.parse_duration_to_seconds("30sec"), 30)
+        self.assertEqual(wchanger.parse_duration_to_seconds("10m"), 600)
+        self.assertEqual(wchanger.parse_duration_to_seconds("5min"), 300)
+        self.assertEqual(wchanger.parse_duration_to_seconds("1h"), 3600)
+        self.assertEqual(wchanger.parse_duration_to_seconds("2hr"), 7200)
+        self.assertEqual(wchanger.parse_duration_to_seconds("1d"), 86400)
+
+    def test_parse_duration_decimals_and_composites(self) -> None:
+        """parse_duration_to_seconds should parse decimal and compound duration strings."""
+        self.assertEqual(wchanger.parse_duration_to_seconds("1.5m"), 90)
+        self.assertEqual(wchanger.parse_duration_to_seconds("0.5h"), 1800)
+        self.assertEqual(wchanger.parse_duration_to_seconds("1h30m"), 5400)
+        self.assertEqual(wchanger.parse_duration_to_seconds("10m 30s"), 630)
+
+    def test_parse_duration_errors(self) -> None:
+        """parse_duration_to_seconds should raise ValueError on zero, negative, or invalid formats."""
+        with self.assertRaises(ValueError):
+            wchanger.parse_duration_to_seconds(0)
+        with self.assertRaises(ValueError):
+            wchanger.parse_duration_to_seconds("0s")
+        with self.assertRaises(ValueError):
+            wchanger.parse_duration_to_seconds("-5")
+        with self.assertRaises(ValueError):
+            wchanger.parse_duration_to_seconds("")
+        with self.assertRaises(ValueError):
+            wchanger.parse_duration_to_seconds("hello")
+        with self.assertRaises(ValueError):
+            wchanger.parse_duration_to_seconds("10xyz")
+
+    def test_duration_param_type_convert(self) -> None:
+        """DURATION_TYPE convert should transform valid strings and reject invalid ones."""
+        self.assertEqual(wchanger.DURATION_TYPE.convert("10m", None, None), 600)
+        self.assertEqual(wchanger.DURATION_TYPE.convert(60, None, None), 60)
+        self.assertIsNone(wchanger.DURATION_TYPE.convert(None, None, None))
+
+    # Recursive Directory Scanning Tests
+    def test_file_validator_recursive(self) -> None:
+        """file_validator should only find subfolder images when recursive=True."""
+        top_img = self.test_dir / "top.png"
+        Image.new("RGB", (10, 10)).save(top_img)
+
+        sub_dir = self.test_dir / "nested" / "sub"
+        sub_dir.mkdir(parents=True)
+        nested_img = sub_dir / "nested.jpg"
+        Image.new("RGB", (10, 10)).save(nested_img)
+
+        non_recursive_results = wchanger.file_validator(self.test_dir, recursive=False)
+        self.assertEqual(len(non_recursive_results), 1)
+        self.assertEqual(non_recursive_results[0], str(top_img.resolve()))
+
+        recursive_results = wchanger.file_validator(self.test_dir, recursive=True)
+        self.assertEqual(len(recursive_results), 2)
+        self.assertIn(str(top_img.resolve()), recursive_results)
+        self.assertIn(str(nested_img.resolve()), recursive_results)
+
+    # Shuffle Tests
+    @patch("random.shuffle")
+    @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "ok"))
+    def test_run_wallpaper_cycle_shuffle_enabled(
+        self, mock_setter: MagicMock, mock_shuffle: MagicMock
+    ) -> None:
+        """run_wallpaper_cycle should call random.shuffle when shuffle=True."""
+        img_path = self.test_dir / "img1.png"
+        Image.new("RGB", (5, 5)).save(img_path)
+
+        with self.assertRaises(SystemExit) as cm:
+            wchanger.run_wallpaper_cycle(
+                desktop_environment="gnome",
+                wallpapers=[str(img_path)],
+                pause_seconds=1,
+                repetition=False,
+                output_mode="console",
+                shuffle=True,
+            )
+        self.assertEqual(cm.exception.code, 0)
+        mock_shuffle.assert_called_once()
+
+    @patch("random.shuffle")
+    @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "ok"))
+    def test_run_wallpaper_cycle_shuffle_disabled(
+        self, mock_setter: MagicMock, mock_shuffle: MagicMock
+    ) -> None:
+        """run_wallpaper_cycle should not call random.shuffle when shuffle=False."""
+        img_path = self.test_dir / "img1.png"
+        Image.new("RGB", (5, 5)).save(img_path)
+
+        with self.assertRaises(SystemExit) as cm:
+            wchanger.run_wallpaper_cycle(
+                desktop_environment="gnome",
+                wallpapers=[str(img_path)],
+                pause_seconds=1,
+                repetition=False,
+                output_mode="console",
+                shuffle=False,
+            )
+        self.assertEqual(cm.exception.code, 0)
+        mock_shuffle.assert_not_called()
+
+    # CLI Tests for Shuffle, Time Units, and Recursive
+    @patch("wchanger.run_wallpaper_cycle")
+    @patch("shutil.which", return_value="/usr/bin/gsettings")
+    def test_cli_pause_with_time_units(
+        self, mock_which: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """cli with --pause 10m should pass pause_seconds=600 to run_wallpaper_cycle."""
+        img_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(img_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-p", "10m", str(self.test_dir)],
+        )
+        self.assertEqual(result.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertEqual(mock_cycle.call_args.kwargs["pause_seconds"], 600)
+
+    @patch("wchanger.run_wallpaper_cycle")
+    @patch("shutil.which", return_value="/usr/bin/gsettings")
+    def test_cli_shuffle_flags(
+        self, mock_which: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """cli with --shuffle and -s should activate shuffle mode."""
+        img_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(img_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-p", "10", "--shuffle", str(self.test_dir)],
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(mock_cycle.call_args.kwargs["shuffle"])
+
+        mock_cycle.reset_mock()
+        result_short = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-p", "10", "-s", str(self.test_dir)],
+        )
+        self.assertEqual(result_short.exit_code, 0)
+        self.assertTrue(mock_cycle.call_args.kwargs["shuffle"])
+
+    @patch("wchanger.run_wallpaper_cycle")
+    @patch("shutil.which", return_value="/usr/bin/gsettings")
+    def test_cli_recursive_flags(
+        self, mock_which: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """cli with --recursive and -R should find nested subfolder wallpapers."""
+        sub = self.test_dir / "nested"
+        sub.mkdir()
+        sub_img = sub / "nested.png"
+        Image.new("RGB", (5, 5)).save(sub_img)
+
+        runner = CliRunner()
+        result_fail = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-p", "10", str(self.test_dir)],
+        )
+        self.assertNotEqual(result_fail.exit_code, 0)
+
+        result_success = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-p", "10", "--recursive", str(self.test_dir)],
+        )
+        self.assertEqual(result_success.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertIn(str(sub_img.resolve()), mock_cycle.call_args.kwargs["wallpapers"])
+
+        mock_cycle.reset_mock()
+        result_short = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-p", "10", "-R", str(self.test_dir)],
+        )
+        self.assertEqual(result_short.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertIn(str(sub_img.resolve()), mock_cycle.call_args.kwargs["wallpapers"])
+
+    @patch("shutil.which", return_value="/usr/bin/systemctl")
+    @patch("click.prompt")
+    @patch("subprocess.run")
+    def test_setup_auto_start_shuffle_and_recursive(
+        self,
+        mock_run: MagicMock,
+        mock_prompt: MagicMock,
+        mock_which: MagicMock,
+    ) -> None:
+        """setup_auto_start should include -s and -R when shuffle and recursive are specified."""
+        img_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(img_path)
+
+        mock_prompt.side_effect = [120, self.test_dir]
+        mock_run.return_value = MagicMock(returncode=0)
+
+        with self.assertRaises(SystemExit) as cm:
+            wchanger.setup_auto_start(
+                desktop_override="gnome",
+                shuffle=True,
+                recursive=True,
+            )
+        self.assertEqual(cm.exception.code, 0)
+
+        tee_call = mock_run.call_args_list[0]
+        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        self.assertIn("-s", written_service_content)
+        self.assertIn("-R", written_service_content)
+
+
 if __name__ == "__main__":
     unittest.main()
 

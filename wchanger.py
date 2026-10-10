@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import platform
 import random
+import re
 import shlex
 import shutil
 import subprocess
@@ -52,10 +53,95 @@ except ImportError:
     HAS_PILLOW = False
 
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 DEFAULT_PAUSE_SECONDS = 60
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "wchanger"
 ONLINE_PROVIDER_CHOICES = ("wallhaven", "bing", "picsum", "loremflickr")
+
+DURATION_TOKEN_REGEX = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]*)")
+
+TIME_UNIT_MULTIPLIERS = {
+    "": 1,
+    "s": 1,
+    "sec": 1,
+    "secs": 1,
+    "second": 1,
+    "seconds": 1,
+    "m": 60,
+    "min": 60,
+    "mins": 60,
+    "minute": 60,
+    "minutes": 60,
+    "h": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "hour": 3600,
+    "hours": 3600,
+    "d": 86400,
+    "day": 86400,
+    "days": 86400,
+}
+
+
+def parse_duration_to_seconds(raw_duration: str | int | float) -> int:
+    """Convert human-readable duration strings (e.g. '10m', '1h', '45s', '90') to integer seconds."""
+    if isinstance(raw_duration, (int, float)):
+        seconds = int(raw_duration)
+        if seconds < 1:
+            raise ValueError("Duration must be at least 1 second.")
+        return seconds
+
+    cleaned = str(raw_duration).strip().lower()
+    if not cleaned:
+        raise ValueError("Duration cannot be empty.")
+
+    tokens = DURATION_TOKEN_REGEX.findall(cleaned)
+    if not tokens:
+        raise ValueError(
+            f"Invalid duration format '{raw_duration}'. "
+            "Specify a number with optional units (e.g., 30s, 10m, 1h, 1d)."
+        )
+
+    reconstructed = "".join(f"{num}{unit}" for num, unit in tokens).replace(" ", "")
+    no_space_cleaned = cleaned.replace(" ", "")
+    if reconstructed != no_space_cleaned:
+        raise ValueError(
+            f"Invalid duration format '{raw_duration}'. "
+            "Specify a number with optional units (e.g., 30s, 10m, 1h, 1d)."
+        )
+
+    total_seconds = 0.0
+    for number_str, unit_str in tokens:
+        multiplier = TIME_UNIT_MULTIPLIERS.get(unit_str)
+        if multiplier is None:
+            raise ValueError(
+                f"Unknown time unit '{unit_str}' in duration '{raw_duration}'. "
+                "Supported units: s (seconds), m (minutes), h (hours), d (days)."
+            )
+        total_seconds += float(number_str) * multiplier
+
+    final_seconds = int(round(total_seconds))
+    if final_seconds < 1:
+        raise ValueError("Duration must evaluate to at least 1 second.")
+
+    return final_seconds
+
+
+class DurationParamType(click.ParamType):
+    """Click parameter type parsing human duration strings like '10m', '1h', or '60'."""
+
+    name = "duration"
+
+    def convert(self, value, param, ctx) -> int | None:
+        if value is None:
+            return None
+        try:
+            return parse_duration_to_seconds(value)
+        except ValueError as error:
+            self.fail(str(error), param, ctx)
+
+
+DURATION_TYPE = DurationParamType()
 
 SUPPORTED_IMAGE_EXTENSIONS = {
     ".jpg",
@@ -265,14 +351,17 @@ def is_valid_image_file(image_path: Path) -> bool:
         return False
 
 
-def file_validator(directory_path: str | Path) -> list[str]:
+def file_validator(directory_path: str | Path, recursive: bool = False) -> list[str]:
     """Return sorted string paths of all readable images inside a directory."""
     folder = Path(directory_path)
     if not folder.exists() or not folder.is_dir():
         return []
 
     try:
-        folder_entries = sorted(folder.iterdir())
+        if recursive:
+            folder_entries = sorted(entry for entry in folder.rglob("*") if entry.is_file())
+        else:
+            folder_entries = sorted(entry for entry in folder.iterdir() if entry.is_file())
     except (PermissionError, OSError):
         return []
 
@@ -595,11 +684,16 @@ def run_wallpaper_cycle(
     repetition: bool,
     output_mode: str,
     color_theme: str | None = None,
+    shuffle: bool = False,
 ) -> None:
     """Cycle wallpapers in a clean loop with graceful interruption handling."""
+    playlist = list(wallpapers)
+    if shuffle:
+        random.shuffle(playlist)
+
     try:
         while True:
-            for wallpaper in wallpapers:
+            for wallpaper in playlist:
                 wallpaper_file = Path(wallpaper)
                 if not wallpaper_file.exists():
                     skip_message = f"Skipping missing wallpaper: {wallpaper}"
@@ -636,6 +730,9 @@ def run_wallpaper_cycle(
                 else:
                     print(f"{MAGENTA}{completion_message}{RESET}")
                 sys.exit(0)
+
+            if shuffle:
+                random.shuffle(playlist)
 
     except KeyboardInterrupt:
         shutdown_message = "Program stopped by user. Exiting..."
@@ -750,6 +847,8 @@ def setup_auto_start_service(
     color_theme: str | None = None,
     initial_photo_path: Path | None = None,
     online_provider: str | None = None,
+    shuffle: bool = False,
+    recursive: bool = False,
 ) -> None:
     """Interactive wizard to generate and install a systemd unit via sudo tee."""
     click.secho(
@@ -763,8 +862,8 @@ def setup_auto_start_service(
         show_auto_start_failure_and_exit()
 
     pause_seconds = click.prompt(
-        f"{GREEN}[+] Enter pause duration between changing wallpapers (seconds){RESET}",
-        type=click.IntRange(min=1),
+        f"{GREEN}[+] Enter pause duration between changing wallpapers (e.g. 60, 10m, 1h){RESET}",
+        type=DURATION_TYPE,
         default=DEFAULT_PAUSE_SECONDS,
         show_default=True,
     )
@@ -786,7 +885,7 @@ def setup_auto_start_service(
                 click.secho(f"[!] '{chosen_directory}' is not a valid directory. Please try again.", fg="red", err=True)
                 continue
 
-            discovered_wallpapers = file_validator(chosen_directory)
+            discovered_wallpapers = file_validator(chosen_directory, recursive=recursive)
             if not discovered_wallpapers:
                 click.secho(f"[!] No valid image files found in '{chosen_directory}'. Please try another path.", fg="red", err=True)
                 continue
@@ -835,6 +934,10 @@ def setup_auto_start_service(
         command_tokens.append(f"--{desktop_environment}")
     if color_theme and desktop_environment == "gnome":
         command_tokens.extend(["-t", color_theme])
+    if shuffle:
+        command_tokens.append("-s")
+    if recursive:
+        command_tokens.append("-R")
     if online_provider:
         command_tokens.extend(["--online", online_provider.lower()])
     elif chosen_directory is not None:
@@ -934,9 +1037,9 @@ setup_auto_start = setup_auto_start_service
 @click.option(
     "--pause",
     "-p",
-    type=click.IntRange(min=1),
+    type=DURATION_TYPE,
     default=None,
-    help="Duration in seconds between changing wallpapers.",
+    help="Duration between changing wallpapers (e.g. 30s, 10m, 1h, or 60).",
 )
 @click.option(
     "--repetition/--no-repetition",
@@ -1010,6 +1113,20 @@ setup_auto_start = setup_auto_start_service
     help="Fetch wallpapers online from a provider (wallhaven, bing, picsum, loremflickr).",
 )
 @click.option(
+    "--shuffle",
+    "-s",
+    is_flag=True,
+    default=False,
+    help="Shuffle wallpapers randomly instead of cycling in folder order.",
+)
+@click.option(
+    "--recursive",
+    "-R",
+    is_flag=True,
+    default=False,
+    help="Search for images recursively in subfolders.",
+)
+@click.option(
     "--run-background",
     "-b",
     is_flag=True,
@@ -1035,6 +1152,8 @@ def cli(
     output: str,
     desktop_override: str | None,
     online: str | None,
+    shuffle: bool,
+    recursive: bool,
     run_background: bool,
     auto_start: bool,
     photo_path: Path | None,
@@ -1051,6 +1170,8 @@ def cli(
             color_theme=theme,
             initial_photo_path=photo_path,
             online_provider=online,
+            shuffle=shuffle,
+            recursive=recursive,
         )
 
     desktop_environment = desktop_override
@@ -1074,8 +1195,8 @@ def cli(
             pause = DEFAULT_PAUSE_SECONDS
         else:
             pause = click.prompt(
-                f"{GREEN}[+] - Please set pause duration between changing wallpapers (seconds){RESET}",
-                type=click.IntRange(min=1),
+                f"{GREEN}[+] - Please set pause duration between changing wallpapers (e.g. 60, 10m, 1h){RESET}",
+                type=DURATION_TYPE,
                 default=DEFAULT_PAUSE_SECONDS,
                 show_default=True,
             )
@@ -1179,7 +1300,7 @@ def cli(
         )
         sys.exit(1)
 
-    discovered_wallpapers = file_validator(selected_folder)
+    discovered_wallpapers = file_validator(selected_folder, recursive=recursive)
     if not discovered_wallpapers:
         click.secho(
             f"Error: No valid image files found in '{selected_folder}'.",
@@ -1197,9 +1318,15 @@ def cli(
             sys.exit(1)
 
         if child_pid > 0:
+            flags_desc = []
+            if shuffle:
+                flags_desc.append("shuffle")
+            if recursive:
+                flags_desc.append("recursive")
+            extra_str = f" | Flags: {', '.join(flags_desc)}" if flags_desc else ""
             click.secho(
                 f"[+] Awesome Wallpaper Changer started in background (PID: {child_pid}).\n"
-                f"[+] Mode: {desktop_display_name} | Pause: {pause}s | Directory: {selected_folder}\n"
+                f"[+] Mode: {desktop_display_name} | Pause: {pause}s | Directory: {selected_folder}{extra_str}\n"
                 f"[+] To stop it later, run: kill {child_pid} (or: pkill -f wchanger.py)",
                 fg="green",
                 bold=True,
@@ -1244,6 +1371,7 @@ def cli(
             repetition=repetition,
             output_mode=output,
             color_theme=theme,
+            shuffle=shuffle,
         )
         sys.exit(0)
 
@@ -1254,6 +1382,10 @@ def cli(
         + (" (forced via flag)" if desktop_override else " (auto-detected)")
         + f"{RESET}"
     )
+    if shuffle:
+        print(f"{CYAN}[i] Shuffle: enabled{RESET}")
+    if recursive:
+        print(f"{CYAN}[i] Recursive scan: enabled{RESET}")
 
     run_wallpaper_cycle(
         desktop_environment=desktop_environment,
@@ -1262,6 +1394,7 @@ def cli(
         repetition=repetition,
         output_mode=output,
         color_theme=theme,
+        shuffle=shuffle,
     )
 
 

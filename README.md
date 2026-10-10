@@ -41,7 +41,9 @@ Designed to be lightweight and robust, it can run interactively in your terminal
   - **Bing Daily Image (`bing`):** Microsoft Bing's daily curated wallpaper photo.
   - **Picsum (`picsum`):** Random high-resolution photography from Lorem Picsum.
   - **LoremFlickr (`loremflickr`):** Fresh nature photography from LoremFlickr.
-- **Offline & Network Resilience:** Detects network connection failures gracefully, provides user-friendly error messages, and automatically retries on subsequent cycles without crashing.
+- **Shuffle Mode (`--shuffle` / `-s`):** Randomize the wallpaper playlist instead of cycling in folder order. Reshuffles automatically between full passes.
+- **Subfolder Search (`--recursive` / `-R`):** Search directories recursively to discover wallpapers tucked away inside subfolders.
+- **Flexible Time Units (`-p` / `--pause`):** Specify pause intervals using human-friendly units (e.g. `10m`, `1h`, `45s`, `1d`, `1h30m`, `1.5h`, or plain numbers `60`).
 - **Single-Pass or Continuous:** Loop forever by default or exit after cycling through all images once using `--no-repetition`.
 
 ---
@@ -252,13 +254,34 @@ Fetch wallpapers dynamically from online providers without needing local image f
 
 ---
 
+#### 7. Shuffle, Recursive Subfolders & Flexible Time Units
+
+- **Shuffle wallpapers randomly every 10 minutes:**
+  ```bash
+  python wchanger.py --shuffle -p 10m /home/user/Pictures/Wallpapers
+  ```
+
+- **Scan all subfolders recursively:**
+  ```bash
+  python wchanger.py --recursive -p 5m /home/user/Pictures
+  ```
+
+- **Combined: Shuffle recursively across all subfolders with 1-hour interval in background:**
+  ```bash
+  python wchanger.py -s -R -p 1h -b /home/user/Pictures
+  ```
+
+---
+
 ## Options and Arguments Reference
 
 ### Options
 
 | Option | Short Flag | Accepted Values | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--pause` | `-p` | Integer (`>= 1`) | `60` *(Interactive prompt if foreground)* | Duration in seconds between wallpaper changes. |
+| `--pause` | `-p` | Duration string (e.g. `30s`, `10m`, `1h`, `1d`, `1h30m`, `1.5h`, `60`) | `60` *(Interactive prompt if foreground)* | Duration between wallpaper changes using human units. |
+| `--shuffle` | `-s` | Flag | `False` | Shuffle wallpapers randomly instead of cycling in folder order. |
+| `--recursive` | `-R` | Flag | `False` | Search for images recursively in subfolders. |
 | `--online` | | `wallhaven`, `bing`, `picsum`, `loremflickr` | `None` *(Uses local photos)* | Fetch wallpapers online from a provider. |
 | `--auto-start` | | Flag | `False` | Interactively configure and install a systemd startup service with root privileges. |
 | `--run-background` | `-b` | Flag | `False` | Run detached in the background with no terminal output or prompts. |
