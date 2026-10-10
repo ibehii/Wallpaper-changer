@@ -7,7 +7,7 @@
 # 🌊 Anahita Wallpaper Changer (`wchanger`)
 ### *The Ultimate Autonomous Wallpaper Rotator & Multi-Monitor Engine for Linux*
 
-[![Release](https://img.shields.io/badge/Release-v3.0.2--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
+[![Release](https://img.shields.io/badge/Release-v3.0.3--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20(6%20Desktops)-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=open-source-initiative&logoColor=white)](LICENSE)

@@ -61,7 +61,7 @@ except ImportError:
         tomllib = None  # type: ignore[assignment]
 
 
-VERSION = "3.0.2"
+VERSION = "3.0.3"
 DEFAULT_PAUSE_SECONDS = 60
 DEFAULT_KEEP_LAST = 20
 DEFAULT_CONFIG_FILENAME = "config.toml"
