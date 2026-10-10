@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/728cdd93-b72f-4b21-9929-1d448c8d7f70" width="85%" alt="Anahita Wallpaper Changer Hero Banner" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);" />
+  <img src="https://github.com/user-attachments/assets/728cdd93-b72f-4b21-9929-1d448c8d7f70" width="70%" alt="Anahita Wallpaper Changer Hero Banner" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); max-height: 420px; object-fit: contain;" />
 </p>
 
 # 🌊 Anahita Wallpaper Changer (`wchanger`)
@@ -30,7 +30,7 @@
 
 > **Transform your Linux desktop experience.**
 > 
-> **Anahita Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **all major Linux Desktop Environments** (**GNOME**, **Cinnamon**, **KDE Plasma 5 & 6**, **XFCE**, **MATE**, and **LXQt**) with native integration, true **multi-monitor independent displays**, curated **online wallpaper providers**, persistent **TOML configuration**, and automated **systemd login service installation**.
+> **Anahita Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **[...**
 
 ---
 
@@ -207,17 +207,17 @@ wchanger -m --online wallhaven -p 10m
 ### How Multi-Monitor Works:
 
 ```
-  ┌────────────────────────────────┐    ┌────────────────────────────────┐
+  ┌────────────────────────────────┐    ┌────────────────────────────┐
   │           Display 1            │    │           Display 2            │
   │        (HDMI-1 / 4K UHD)       │    │        (DP-1 / 1440p)          │
   │                                │    │                                │
   │    [ Mountain Sunset Image ]   │    │    [ Deep Space Nebula Image ] │
-  └────────────────────────────────┘    └────────────────────────────────┘
+  └────────────────────────────────┘    └────────────────────────────┘
 ```
 
 1. **KDE Plasma & XFCE (Native Multi-Screen):** Queries individual screen containments (`desktop[0]`, `desktop[1]` or `monitor0`, `monitor1`) and issues independent native background assignments.
-2. **GNOME, Cinnamon, MATE & LXQt (Intelligent Panoramic Canvas):** Inspects physical geometry and resolution for each monitor via `xrandr`, scales and crops each wallpaper without distortion (`ImageOps.fit`), stitches them into a unified high-resolution canvas, and sets `picture-options = 'spanned'`.
-3. **Anti-Caching Mechanism:** Alternates target output files (`multimonitor_spanned_0.png` $\leftrightarrow$ `multimonitor_spanned_1.png`) so desktop environments register instant file URI changes on every cycle without display flickering.
+2. **GNOME, Cinnamon, MATE & LXQt (Intelligent Panoramic Canvas):** Inspects physical geometry and resolution for each monitor via `xrandr`, scales and crops each wallpaper without distortion (`ImageOps.fit`), then merges them into a wide composite image that desktop environments can assign as one background.
+3. **Anti-Caching Mechanism:** Alternates target output files (`multimonitor_spanned_0.png` ↔ `multimonitor_spanned_1.png`) so desktop environments register instant file URI changes and refresh correctly.
 
 ---
 
@@ -427,7 +427,7 @@ Usage: wchanger [OPTIONS] [PHOTO_PATH]
 | `Error: 'xfconf-query' utility was not found` | XFCE configuration tool is missing. | Install `xfconf` package via your package manager. |
 | `Error: 'pcmanfm-qt' utility was not found` | LXQt file manager / desktop utility is missing. | Install `pcmanfm-qt` package via your package manager. |
 | `Error: Could not auto-detect your desktop environment` | Non-standard session or custom window manager. | Pass `--gnome`, `--cinnamon`, `--kde`, `--xfce`, `--mate`, or `--lxqt` explicitly. |
-| Wallpapers do not visibly change on KDE Plasma | Desktop widgets are locked in Plasma. | Unlock desktop widgets or run: `qdbus org.kde.plasmashell /PlasmaShell evaluateScript 'lockCorona(!locked)'`. |
+| Wallpapers do not visibly change on KDE Plasma | Desktop widgets are locked in Plasma. | Unlock desktop widgets or run: `qdbus org.kde.plasmashell /PlasmaShell evaluateScript 'lockCorona(!locked); lockCorona(false);'` to force refresh. |
 | `[!] Network Error: Unable to connect to '<provider>'` | Computer is offline or DNS lookup failed. | Check connection; `wchanger` automatically retries next interval without crashing. |
 | Multi-monitor shows duplicate wallpapers on GNOME | `xrandr` is not installed or running Wayland without display query. | Install `x11-xserver-utils` (Debian/Ubuntu) or `xorg-xrandr` (Arch). |
 
