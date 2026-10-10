@@ -36,28 +36,28 @@
   <tr>
     <td align="center" width="25%">
       <a href="#-quick-start">
-        <img src="https://img.icons8.com/fluency/48/rocket.png" width="36"/><br/>
+        <font size="6">🚀</font><br/>
         <b>Quick Start</b><br/>
         <sub>Get started in 30 seconds</sub>
       </a>
     </td>
     <td align="center" width="25%">
       <a href="#-key-features">
-        <img src="https://img.icons8.com/fluency/48/star.png" width="36"/><br/>
+        <font size="6">✨</font><br/>
         <b>Key Features</b><br/>
         <sub>Everything wchanger can do</sub>
       </a>
     </td>
     <td align="center" width="25%">
       <a href="#-desktop-environments-matrix">
-        <img src="https://img.icons8.com/fluency/48/monitor.png" width="36"/><br/>
+        <font size="6">🖥️</font><br/>
         <b>Desktop Support</b><br/>
         <sub>GNOME, KDE, XFCE & more</sub>
       </a>
     </td>
     <td align="center" width="25%">
       <a href="#-multi-monitor-support">
-        <img src="https://img.icons8.com/fluency/48/dual-monitor.png" width="36"/><br/>
+        <font size="6">🖥️🖥️</font><br/>
         <b>Multi-Monitor</b><br/>
         <sub>Different image per screen</sub>
       </a>
@@ -66,28 +66,28 @@
   <tr>
     <td align="center" width="25%">
       <a href="#-installation">
-        <img src="https://img.icons8.com/fluency/48/download.png" width="36"/><br/>
+        <font size="6">📦</font><br/>
         <b>Installation</b><br/>
         <sub>Install to /bin & system PATH</sub>
       </a>
     </td>
     <td align="center" width="25%">
       <a href="#-online-wallpaper-sources">
-        <img src="https://img.icons8.com/fluency/48/globe.png" width="36"/><br/>
+        <font size="6">🌐</font><br/>
         <b>Online Sources</b><br/>
         <sub>Wallhaven, Bing, Picsum</sub>
       </a>
     </td>
     <td align="center" width="25%">
       <a href="#-configuration-file-configtoml">
-        <img src="https://img.icons8.com/fluency/48/settings.png" width="36"/><br/>
+        <font size="6">⚙️</font><br/>
         <b>Configuration</b><br/>
         <sub>Zero-typing config.toml</sub>
       </a>
     </td>
     <td align="center" width="25%">
       <a href="#-troubleshooting">
-        <img src="https://img.icons8.com/fluency/48/help.png" width="36"/><br/>
+        <font size="6">🔍</font><br/>
         <b>Troubleshooting</b><br/>
         <sub>Fix common desktop issues</sub>
       </a>
