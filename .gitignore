@@ -1,2 +1,6 @@
 .venv
 info.log
+__pycache__/
+*.pyc
+test/
+test/*
