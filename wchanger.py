@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import getpass
 import io
+import json
 import logging
 import os
 from pathlib import Path
 import platform
+import random
 import shlex
 import shutil
 import subprocess
 import sys
 import time
 from typing import Sequence
+from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname
+from urllib.request import Request, url2pathname, urlopen
 
 import click
 
@@ -49,8 +52,10 @@ except ImportError:
     HAS_PILLOW = False
 
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 DEFAULT_PAUSE_SECONDS = 60
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "wchanger"
+ONLINE_PROVIDER_CHOICES = ("wallhaven", "bing", "picsum", "loremflickr")
 
 SUPPORTED_IMAGE_EXTENSIONS = {
     ".jpg",
@@ -461,6 +466,128 @@ set_mate_wallpaper = set_mate_background
 set_lxqt_wallpaper = set_lxqt_background
 
 
+# Online Wallpaper Sources Fetchers
+def fetch_wallhaven_url() -> str:
+    """Fetch a random top wallpaper image URL from the Wallhaven API."""
+    api_url = (
+        "https://wallhaven.cc/api/v1/search?sorting=toplist&topRange=1d&purity=100&atleast=1920x1080"
+    )
+    request = Request(api_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
+    with urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    wallpapers = payload.get("data", [])
+    if not wallpapers:
+        raise ValueError("No wallpapers found in Wallhaven API response.")
+    selected = random.choice(wallpapers)
+    image_url = selected.get("path")
+    if not image_url:
+        raise ValueError("Wallhaven entry missing image path.")
+    return str(image_url)
+
+
+def fetch_bing_url() -> str:
+    """Fetch today's Bing daily photo URL."""
+    api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US"
+    request = Request(api_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
+    with urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    images = payload.get("images", [])
+    if not images:
+        raise ValueError("No images found in Bing API response.")
+    image_relative_url = images[0].get("url")
+    if not image_relative_url:
+        raise ValueError("Bing API response missing image url.")
+    return f"https://www.bing.com{image_relative_url}"
+
+
+def fetch_picsum_url() -> str:
+    """Fetch a random photo URL from Picsum."""
+    random_seed = random.randint(1, 1000000)
+    return f"https://picsum.photos/1920/1080?random={random_seed}"
+
+
+def fetch_loremflickr_url() -> str:
+    """Fetch a nature photo URL from LoremFlickr."""
+    random_lock = random.randint(1, 1000000)
+    return f"https://loremflickr.com/1920/1080/nature?lock={random_lock}"
+
+
+ONLINE_PROVIDERS = {
+    "wallhaven": fetch_wallhaven_url,
+    "bing": fetch_bing_url,
+    "picsum": fetch_picsum_url,
+    "loremflickr": fetch_loremflickr_url,
+}
+
+
+def download_online_wallpaper(image_url: str, destination_path: Path) -> Path:
+    """Download remote image from URL and write to local destination cache."""
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    request = Request(image_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
+    with urlopen(request, timeout=20) as response:
+        image_data = response.read()
+    if not image_data:
+        raise ValueError("Received empty image content from provider.")
+    destination_path.write_bytes(image_data)
+    return destination_path
+
+
+def format_network_error(provider: str, error: Exception) -> str:
+    """Format a user-friendly error message when network requests fail."""
+    if isinstance(error, HTTPError):
+        return (
+            f"Server returned HTTP error {error.code} ({error.reason}) "
+            f"while requesting from '{provider}'."
+        )
+    if isinstance(error, URLError):
+        reason = getattr(error, "reason", error)
+        return (
+            f"Unable to connect to '{provider}' ({reason}). "
+            "Please check your internet connection."
+        )
+    return f"Failed to fetch wallpaper from '{provider}': {error}"
+
+
+def set_wallpaper_for_desktop(
+    desktop_environment: str,
+    wallpaper_path: Path | str,
+    color_theme: str | None = None,
+) -> tuple[bool, str]:
+    """Apply wallpaper to the current desktop environment.
+
+    Returns a tuple of (success_status, status_message).
+    """
+    wallpaper_file = Path(wallpaper_path)
+    file_uri = wallpaper_file.resolve().as_uri()
+    resolved_path_str = str(wallpaper_path)
+    operation_success = False
+    status_message = ""
+
+    if desktop_environment == "gnome":
+        operation_success = set_gnome_background(file_uri, color_theme)
+        if color_theme is not None:
+            status_message = f"Wallpaper changed on GNOME to {wallpaper_path} in {color_theme} theme."
+        else:
+            status_message = f"Wallpaper changed on GNOME to {wallpaper_path} in both dark and light themes."
+    elif desktop_environment == "cinnamon":
+        operation_success = set_cinnamon_background(file_uri)
+        status_message = f"Wallpaper changed on Cinnamon to {wallpaper_path}."
+    elif desktop_environment == "kde":
+        operation_success = set_kde_background(file_uri)
+        status_message = f"Wallpaper changed on KDE Plasma to {wallpaper_path}."
+    elif desktop_environment == "xfce":
+        operation_success = set_xfce_background(resolved_path_str)
+        status_message = f"Wallpaper changed on XFCE to {wallpaper_path}."
+    elif desktop_environment == "mate":
+        operation_success = set_mate_background(resolved_path_str)
+        status_message = f"Wallpaper changed on MATE to {wallpaper_path}."
+    elif desktop_environment == "lxqt":
+        operation_success = set_lxqt_background(resolved_path_str)
+        status_message = f"Wallpaper changed on LXQt to {wallpaper_path}."
+
+    return operation_success, status_message
+
+
 def run_wallpaper_cycle(
     desktop_environment: str,
     wallpapers: Sequence[str],
@@ -482,30 +609,11 @@ def run_wallpaper_cycle(
                         print(f"{YELLOW}{skip_message}{RESET}")
                     continue
 
-                file_uri = wallpaper_file.resolve().as_uri()
-                operation_success = False
-
-                if desktop_environment == "gnome":
-                    operation_success = set_gnome_background(file_uri, color_theme)
-                    if color_theme is not None:
-                        status_message = f"Wallpaper changed on GNOME to {wallpaper} in {color_theme} theme."
-                    else:
-                        status_message = f"Wallpaper changed on GNOME to {wallpaper} in both dark and light themes."
-                elif desktop_environment == "cinnamon":
-                    operation_success = set_cinnamon_background(file_uri)
-                    status_message = f"Wallpaper changed on Cinnamon to {wallpaper}."
-                elif desktop_environment == "kde":
-                    operation_success = set_kde_background(file_uri)
-                    status_message = f"Wallpaper changed on KDE Plasma to {wallpaper}."
-                elif desktop_environment == "xfce":
-                    operation_success = set_xfce_background(wallpaper)
-                    status_message = f"Wallpaper changed on XFCE to {wallpaper}."
-                elif desktop_environment == "mate":
-                    operation_success = set_mate_background(wallpaper)
-                    status_message = f"Wallpaper changed on MATE to {wallpaper}."
-                elif desktop_environment == "lxqt":
-                    operation_success = set_lxqt_background(wallpaper)
-                    status_message = f"Wallpaper changed on LXQt to {wallpaper}."
+                operation_success, status_message = set_wallpaper_for_desktop(
+                    desktop_environment=desktop_environment,
+                    wallpaper_path=wallpaper,
+                    color_theme=color_theme,
+                )
 
                 if operation_success:
                     if output_mode == "log":
@@ -538,6 +646,89 @@ def run_wallpaper_cycle(
         sys.exit(0)
 
 
+def run_online_wallpaper_cycle(
+    desktop_environment: str,
+    provider: str,
+    pause_seconds: int,
+    repetition: bool,
+    output_mode: str,
+    color_theme: str | None = None,
+    cache_dir: Path | None = None,
+) -> None:
+    """Cycle wallpapers from an online provider in a loop with error handling."""
+    provider_key = provider.lower()
+    fetcher = ONLINE_PROVIDERS.get(provider_key)
+    if fetcher is None:
+        raise ValueError(f"Unknown online provider '{provider}'.")
+
+    target_cache_dir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
+    target_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    toggle_slot = 1
+    try:
+        while True:
+            cache_file = target_cache_dir / f"wallpaper_{provider_key}_{toggle_slot}.jpg"
+            cycle_succeeded = False
+            try:
+                if output_mode != "log":
+                    print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'...{RESET}")
+
+                image_url = fetcher()
+                download_online_wallpaper(image_url, cache_file)
+                toggle_slot = 2 if toggle_slot == 1 else 1
+
+                operation_success, status_message = set_wallpaper_for_desktop(
+                    desktop_environment=desktop_environment,
+                    wallpaper_path=cache_file,
+                    color_theme=color_theme,
+                )
+
+                if operation_success:
+                    cycle_succeeded = True
+                    log_detail = f"Online wallpaper updated from {provider_key}: {image_url}"
+                    if output_mode == "log":
+                        logging.info(log_detail)
+                    else:
+                        print(f"{MAGENTA}{status_message}{RESET}")
+                else:
+                    failure_message = f"Failed to set online wallpaper to desktop ({desktop_environment})."
+                    if output_mode == "log":
+                        logging.error(failure_message)
+                    else:
+                        print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
+
+            except (URLError, HTTPError, TimeoutError, ConnectionError, OSError, ValueError) as network_error:
+                error_details = format_network_error(provider_key, network_error)
+                if output_mode == "log":
+                    logging.error(f"Network error with online provider '{provider_key}': {error_details}")
+                else:
+                    click.secho(f"[!] Network Error: {error_details}", fg="red", bold=True, err=True)
+
+                if not repetition:
+                    sys.exit(1)
+
+            if not repetition:
+                if cycle_succeeded:
+                    completion_message = f"Online wallpaper from '{provider_key}' applied successfully."
+                    if output_mode == "log":
+                        logging.info(completion_message)
+                    else:
+                        print(f"{MAGENTA}{completion_message}{RESET}")
+                    sys.exit(0)
+                else:
+                    sys.exit(1)
+
+            time.sleep(pause_seconds)
+
+    except KeyboardInterrupt:
+        shutdown_message = "Program stopped by user. Exiting..."
+        if output_mode == "log":
+            logging.info("Online wallpaper changer stopped by user.")
+        else:
+            print(f"\n{YELLOW}[!] {shutdown_message}{RESET}")
+        sys.exit(0)
+
+
 def show_auto_start_failure_and_exit() -> None:
     """Print troubleshooting advice directing users to README on service setup failure."""
     click.secho(
@@ -558,6 +749,7 @@ def setup_auto_start_service(
     desktop_override: str | None = None,
     color_theme: str | None = None,
     initial_photo_path: Path | None = None,
+    online_provider: str | None = None,
 ) -> None:
     """Interactive wizard to generate and install a systemd unit via sudo tee."""
     click.secho(
@@ -577,26 +769,30 @@ def setup_auto_start_service(
         show_default=True,
     )
 
-    default_directory = (
-        initial_photo_path if initial_photo_path is not None else DEFAULT_WALLPAPERS_DIR
-    )
-
-    while True:
-        chosen_directory = click.prompt(
-            f"{GREEN}[+] Enter path to directory containing wallpapers{RESET}",
-            type=click.Path(file_okay=False, dir_okay=True, resolve_path=True, path_type=Path),
-            default=default_directory,
-            show_default=True,
+    chosen_directory: Path | None = None
+    if online_provider is None:
+        default_directory = (
+            initial_photo_path if initial_photo_path is not None else DEFAULT_WALLPAPERS_DIR
         )
-        if not chosen_directory.exists() or not chosen_directory.is_dir():
-            click.secho(f"[!] '{chosen_directory}' is not a valid directory. Please try again.", fg="red", err=True)
-            continue
 
-        discovered_wallpapers = file_validator(chosen_directory)
-        if not discovered_wallpapers:
-            click.secho(f"[!] No valid image files found in '{chosen_directory}'. Please try another path.", fg="red", err=True)
-            continue
-        break
+        while True:
+            chosen_directory = click.prompt(
+                f"{GREEN}[+] Enter path to directory containing wallpapers{RESET}",
+                type=click.Path(file_okay=False, dir_okay=True, resolve_path=True, path_type=Path),
+                default=default_directory,
+                show_default=True,
+            )
+            if not chosen_directory.exists() or not chosen_directory.is_dir():
+                click.secho(f"[!] '{chosen_directory}' is not a valid directory. Please try again.", fg="red", err=True)
+                continue
+
+            discovered_wallpapers = file_validator(chosen_directory)
+            if not discovered_wallpapers:
+                click.secho(f"[!] No valid image files found in '{chosen_directory}'. Please try another path.", fg="red", err=True)
+                continue
+            break
+    else:
+        click.secho(f"[i] Using online wallpaper provider: {online_provider.lower()}", fg="cyan")
 
     output_mode = "log"
 
@@ -639,7 +835,10 @@ def setup_auto_start_service(
         command_tokens.append(f"--{desktop_environment}")
     if color_theme and desktop_environment == "gnome":
         command_tokens.extend(["-t", color_theme])
-    command_tokens.append(str(chosen_directory.resolve()))
+    if online_provider:
+        command_tokens.extend(["--online", online_provider.lower()])
+    elif chosen_directory is not None:
+        command_tokens.append(str(chosen_directory.resolve()))
 
     full_exec_command = shlex.join(command_tokens)
 
@@ -805,6 +1004,12 @@ setup_auto_start = setup_auto_start_service
     help="Manually override desktop environment to LXQt.",
 )
 @click.option(
+    "--online",
+    type=click.Choice(ONLINE_PROVIDER_CHOICES, case_sensitive=False),
+    default=None,
+    help="Fetch wallpapers online from a provider (wallhaven, bing, picsum, loremflickr).",
+)
+@click.option(
     "--run-background",
     "-b",
     is_flag=True,
@@ -829,6 +1034,7 @@ def cli(
     theme: str | None,
     output: str,
     desktop_override: str | None,
+    online: str | None,
     run_background: bool,
     auto_start: bool,
     photo_path: Path | None,
@@ -844,18 +1050,8 @@ def cli(
             desktop_override=desktop_override,
             color_theme=theme,
             initial_photo_path=photo_path,
+            online_provider=online,
         )
-
-    selected_folder = photo_path if photo_path is not None else DEFAULT_WALLPAPERS_DIR
-
-    if not selected_folder.exists() or not selected_folder.is_dir():
-        click.secho(
-            f"Error: Wallpaper directory '{selected_folder}' does not exist or is not a folder.",
-            fg="red",
-            bold=True,
-            err=True,
-        )
-        sys.exit(1)
 
     desktop_environment = desktop_override
     if desktop_environment is None:
@@ -873,18 +1069,8 @@ def cli(
 
     verify_system_requirements(desktop_environment)
 
-    discovered_wallpapers = file_validator(selected_folder)
-    if not discovered_wallpapers:
-        click.secho(
-            f"Error: No valid image files found in '{selected_folder}'.",
-            fg="red",
-            bold=True,
-            err=True,
-        )
-        sys.exit(1)
-
     if pause is None:
-        if run_background or not sys.stdin.isatty():
+        if not repetition or run_background or not sys.stdin.isatty():
             pause = DEFAULT_PAUSE_SECONDS
         else:
             pause = click.prompt(
@@ -902,6 +1088,106 @@ def cli(
             fg="yellow",
             err=True,
         )
+
+    if online is not None:
+        online_provider = online.lower()
+        if run_background:
+            try:
+                child_pid = os.fork()
+            except OSError as fork_error:
+                click.secho(f"Error: Could not fork background process: {fork_error}", fg="red", err=True)
+                sys.exit(1)
+
+            if child_pid > 0:
+                click.secho(
+                    f"[+] Awesome Wallpaper Changer started in background (PID: {child_pid}).\n"
+                    f"[+] Mode: {desktop_display_name} | Pause: {pause}s | Source: online ({online_provider})\n"
+                    f"[+] To stop it later, run: kill {child_pid} (or: pkill -f wchanger.py)",
+                    fg="green",
+                    bold=True,
+                )
+                sys.exit(0)
+
+            os.setsid()
+
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+            devnull_input = os.open(os.devnull, os.O_RDONLY)
+            devnull_output = os.open(os.devnull, os.O_WRONLY)
+
+            try:
+                stdin_fd = sys.stdin.fileno()
+            except (io.UnsupportedOperation, AttributeError):
+                stdin_fd = 0
+
+            try:
+                stdout_fd = sys.stdout.fileno()
+            except (io.UnsupportedOperation, AttributeError):
+                stdout_fd = 1
+
+            try:
+                stderr_fd = sys.stderr.fileno()
+            except (io.UnsupportedOperation, AttributeError):
+                stderr_fd = 2
+
+            os.dup2(devnull_input, stdin_fd)
+            os.dup2(devnull_output, stdout_fd)
+            os.dup2(devnull_output, stderr_fd)
+
+            os.close(devnull_input)
+            os.close(devnull_output)
+
+            configure_logging(output)
+            run_online_wallpaper_cycle(
+                desktop_environment=desktop_environment,
+                provider=online_provider,
+                pause_seconds=pause,
+                repetition=repetition,
+                output_mode=output,
+                color_theme=theme,
+            )
+            sys.exit(0)
+
+        print(BANNER)
+        configure_logging(output)
+        print(
+            f"{CYAN}[i] Desktop environment: {desktop_display_name}"
+            + (" (forced via flag)" if desktop_override else " (auto-detected)")
+            + f"{RESET}"
+        )
+        print(f"{CYAN}[i] Wallpaper source: online provider '{online_provider}'{RESET}")
+
+        run_online_wallpaper_cycle(
+            desktop_environment=desktop_environment,
+            provider=online_provider,
+            pause_seconds=pause,
+            repetition=repetition,
+            output_mode=output,
+            color_theme=theme,
+        )
+        return
+
+    selected_folder = photo_path if photo_path is not None else DEFAULT_WALLPAPERS_DIR
+
+    if not selected_folder.exists() or not selected_folder.is_dir():
+        click.secho(
+            f"Error: Wallpaper directory '{selected_folder}' does not exist or is not a folder.",
+            fg="red",
+            bold=True,
+            err=True,
+        )
+        sys.exit(1)
+
+    discovered_wallpapers = file_validator(selected_folder)
+    if not discovered_wallpapers:
+        click.secho(
+            f"Error: No valid image files found in '{selected_folder}'.",
+            fg="red",
+            bold=True,
+            err=True,
+        )
+        sys.exit(1)
 
     if run_background:
         try:

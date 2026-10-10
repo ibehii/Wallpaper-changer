@@ -1552,6 +1552,297 @@ class TestWallpaperChanger(unittest.TestCase):
         )
 
 
+    # Online Wallpaper Source Tests
+    @patch("wchanger.urlopen")
+    def test_fetch_wallhaven_url_success(self, mock_urlopen: MagicMock) -> None:
+        """fetch_wallhaven_url should parse JSON response and return image path."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = (
+            b'{"data": [{"id": "abc", "path": "https://w.wallhaven.cc/full/abc.jpg"}]}'
+        )
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        url = wchanger.fetch_wallhaven_url()
+        self.assertEqual(url, "https://w.wallhaven.cc/full/abc.jpg")
+
+    @patch("wchanger.urlopen")
+    def test_fetch_wallhaven_url_empty_data(self, mock_urlopen: MagicMock) -> None:
+        """fetch_wallhaven_url should raise ValueError when data is empty."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b'{"data": []}'
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        with self.assertRaises(ValueError) as cm:
+            wchanger.fetch_wallhaven_url()
+        self.assertIn("No wallpapers found", str(cm.exception))
+
+    @patch("wchanger.urlopen")
+    def test_fetch_wallhaven_url_missing_path(self, mock_urlopen: MagicMock) -> None:
+        """fetch_wallhaven_url should raise ValueError when entry is missing path."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b'{"data": [{"id": "123"}]}'
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        with self.assertRaises(ValueError) as cm:
+            wchanger.fetch_wallhaven_url()
+        self.assertIn("Wallhaven entry missing image path", str(cm.exception))
+
+    @patch("wchanger.urlopen")
+    def test_fetch_bing_url_success(self, mock_urlopen: MagicMock) -> None:
+        """fetch_bing_url should parse JSON response and construct full image URL."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = (
+            b'{"images": [{"url": "/th?id=OHR.SampleBing_EN-US_1920x1080.jpg"}]}'
+        )
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        url = wchanger.fetch_bing_url()
+        self.assertEqual(url, "https://www.bing.com/th?id=OHR.SampleBing_EN-US_1920x1080.jpg")
+
+    @patch("wchanger.urlopen")
+    def test_fetch_bing_url_empty_images(self, mock_urlopen: MagicMock) -> None:
+        """fetch_bing_url should raise ValueError when images list is empty."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b'{"images": []}'
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        with self.assertRaises(ValueError) as cm:
+            wchanger.fetch_bing_url()
+        self.assertIn("No images found", str(cm.exception))
+
+    def test_fetch_picsum_url(self) -> None:
+        """fetch_picsum_url should return a 1920x1080 random URL."""
+        url = wchanger.fetch_picsum_url()
+        self.assertTrue(url.startswith("https://picsum.photos/1920/1080?random="))
+
+    def test_fetch_loremflickr_url(self) -> None:
+        """fetch_loremflickr_url should return a 1920x1080 nature lock URL."""
+        url = wchanger.fetch_loremflickr_url()
+        self.assertTrue(url.startswith("https://loremflickr.com/1920/1080/nature?lock="))
+
+    @patch("wchanger.urlopen")
+    def test_download_online_wallpaper_success(self, mock_urlopen: MagicMock) -> None:
+        """download_online_wallpaper should fetch bytes and write to destination path."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b"FAKE_IMAGE_BYTES_123"
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        dest_file = self.test_dir / "cache" / "wallpaper_test.jpg"
+        result_path = wchanger.download_online_wallpaper("https://example.com/image.jpg", dest_file)
+
+        self.assertEqual(result_path, dest_file)
+        self.assertTrue(dest_file.exists())
+        self.assertEqual(dest_file.read_bytes(), b"FAKE_IMAGE_BYTES_123")
+
+    @patch("wchanger.urlopen")
+    def test_download_online_wallpaper_empty_content(self, mock_urlopen: MagicMock) -> None:
+        """download_online_wallpaper should raise ValueError when content is empty."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b""
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        dest_file = self.test_dir / "cache" / "wallpaper_empty.jpg"
+        with self.assertRaises(ValueError) as cm:
+            wchanger.download_online_wallpaper("https://example.com/image.jpg", dest_file)
+        self.assertIn("Received empty image content", str(cm.exception))
+
+    def test_format_network_error_http(self) -> None:
+        """format_network_error should format HTTPError with status code."""
+        from urllib.error import HTTPError
+        error = HTTPError("https://example.com", 404, "Not Found", {}, None)
+        msg = wchanger.format_network_error("bing", error)
+        self.assertIn("404", msg)
+        self.assertIn("bing", msg)
+
+    def test_format_network_error_url(self) -> None:
+        """format_network_error should format URLError advising connection check."""
+        from urllib.error import URLError
+        error = URLError("Temporary failure in name resolution")
+        msg = wchanger.format_network_error("wallhaven", error)
+        self.assertIn("check your internet connection", msg)
+        self.assertIn("wallhaven", msg)
+
+    @patch("wchanger.set_gnome_background", return_value=True)
+    @patch("wchanger.set_cinnamon_background", return_value=True)
+    @patch("wchanger.set_kde_background", return_value=True)
+    @patch("wchanger.set_xfce_background", return_value=True)
+    @patch("wchanger.set_mate_background", return_value=True)
+    @patch("wchanger.set_lxqt_background", return_value=True)
+    def test_set_wallpaper_for_desktop_all_environments(
+        self,
+        mock_lxqt: MagicMock,
+        mock_mate: MagicMock,
+        mock_xfce: MagicMock,
+        mock_kde: MagicMock,
+        mock_cinnamon: MagicMock,
+        mock_gnome: MagicMock,
+    ) -> None:
+        """set_wallpaper_for_desktop should dispatch properly across all 6 desktop environments."""
+        sample_file = self.test_dir / "test.jpg"
+        sample_file.write_bytes(b"data")
+
+        # GNOME
+        success, msg = wchanger.set_wallpaper_for_desktop("gnome", sample_file, "dark")
+        self.assertTrue(success)
+        mock_gnome.assert_called_once_with(sample_file.resolve().as_uri(), "dark")
+
+        # Cinnamon
+        success, msg = wchanger.set_wallpaper_for_desktop("cinnamon", sample_file)
+        self.assertTrue(success)
+        mock_cinnamon.assert_called_once_with(sample_file.resolve().as_uri())
+
+        # KDE
+        success, msg = wchanger.set_wallpaper_for_desktop("kde", sample_file)
+        self.assertTrue(success)
+        mock_kde.assert_called_once_with(sample_file.resolve().as_uri())
+
+        # XFCE
+        success, msg = wchanger.set_wallpaper_for_desktop("xfce", sample_file)
+        self.assertTrue(success)
+        mock_xfce.assert_called_once_with(str(sample_file))
+
+        # MATE
+        success, msg = wchanger.set_wallpaper_for_desktop("mate", sample_file)
+        self.assertTrue(success)
+        mock_mate.assert_called_once_with(str(sample_file))
+
+        # LXQt
+        success, msg = wchanger.set_wallpaper_for_desktop("lxqt", sample_file)
+        self.assertTrue(success)
+        mock_lxqt.assert_called_once_with(str(sample_file))
+
+    @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "Wallpaper changed"))
+    @patch("wchanger.download_online_wallpaper")
+    @patch("wchanger.ONLINE_PROVIDERS")
+    def test_run_online_wallpaper_cycle_success(
+        self,
+        mock_providers: MagicMock,
+        mock_download: MagicMock,
+        mock_setter: MagicMock,
+    ) -> None:
+        """run_online_wallpaper_cycle should fetch, download, set wallpaper and exit when repetition=False."""
+        mock_fetcher = MagicMock(return_value="https://example.com/wallpaper.jpg")
+        mock_providers.get.return_value = mock_fetcher
+
+        with self.assertRaises(SystemExit) as cm:
+            wchanger.run_online_wallpaper_cycle(
+                desktop_environment="gnome",
+                provider="bing",
+                pause_seconds=1,
+                repetition=False,
+                output_mode="console",
+                cache_dir=self.test_dir,
+            )
+        self.assertEqual(cm.exception.code, 0)
+        mock_fetcher.assert_called_once()
+        mock_download.assert_called_once()
+        mock_setter.assert_called_once()
+
+    @patch("wchanger.ONLINE_PROVIDERS")
+    def test_run_online_wallpaper_cycle_network_error_exit(
+        self, mock_providers: MagicMock
+    ) -> None:
+        """run_online_wallpaper_cycle should exit with 1 on network error when repetition=False."""
+        from urllib.error import URLError
+        mock_fetcher = MagicMock(side_effect=URLError("DNS resolution failed"))
+        mock_providers.get.return_value = mock_fetcher
+
+        with self.assertRaises(SystemExit) as cm:
+            wchanger.run_online_wallpaper_cycle(
+                desktop_environment="gnome",
+                provider="wallhaven",
+                pause_seconds=1,
+                repetition=False,
+                output_mode="console",
+                cache_dir=self.test_dir,
+            )
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_run_online_wallpaper_cycle_unknown_provider(self) -> None:
+        """run_online_wallpaper_cycle should raise ValueError on invalid provider name."""
+        with self.assertRaises(ValueError) as cm:
+            wchanger.run_online_wallpaper_cycle(
+                desktop_environment="gnome",
+                provider="nonexistent_provider",
+                pause_seconds=1,
+                repetition=False,
+                output_mode="console",
+            )
+        self.assertIn("Unknown online provider", str(cm.exception))
+
+    def test_cli_help_includes_online(self) -> None:
+        """cli --help should list the --online option with all supported providers."""
+        runner = CliRunner()
+        result = runner.invoke(wchanger.cli, ["--help"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("--online", result.output)
+        self.assertIn("wallhaven", result.output)
+        self.assertIn("bing", result.output)
+        self.assertIn("picsum", result.output)
+        self.assertIn("loremflickr", result.output)
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("shutil.which", return_value="/usr/bin/gsettings")
+    def test_cli_online_dispatch(
+        self, mock_which: MagicMock, mock_online_cycle: MagicMock
+    ) -> None:
+        """cli with --online should dispatch directly to run_online_wallpaper_cycle."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--online", "wallhaven", "--gnome", "-p", "10", "--no-repetition"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        mock_online_cycle.assert_called_once()
+        self.assertEqual(mock_online_cycle.call_args.kwargs["provider"], "wallhaven")
+        self.assertEqual(mock_online_cycle.call_args.kwargs["desktop_environment"], "gnome")
+        self.assertFalse(mock_online_cycle.call_args.kwargs["repetition"])
+
+    @patch("os.fork", return_value=54321)
+    @patch("wchanger.find_kde_qdbus_executable", return_value="qdbus")
+    def test_cli_online_background(
+        self, mock_qdbus: MagicMock, mock_fork: MagicMock
+    ) -> None:
+        """cli with --online and -b should fork and report background startup."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--online", "picsum", "--kde", "-b", "-p", "30"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Awesome Wallpaper Changer started in background (PID: 54321)", result.output)
+        self.assertIn("Source: online (picsum)", result.output)
+
+    @patch("shutil.which", return_value="/usr/bin/systemctl")
+    @patch("click.prompt")
+    @patch("subprocess.run")
+    def test_setup_auto_start_online_provider(
+        self,
+        mock_run: MagicMock,
+        mock_prompt: MagicMock,
+        mock_which: MagicMock,
+    ) -> None:
+        """setup_auto_start with online_provider should configure --online in service definition."""
+        mock_prompt.return_value = 60
+        mock_run.return_value = MagicMock(returncode=0)
+
+        with self.assertRaises(SystemExit) as cm:
+            wchanger.setup_auto_start(desktop_override="gnome", online_provider="bing")
+        self.assertEqual(cm.exception.code, 0)
+
+        tee_call = mock_run.call_args_list[0]
+        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        self.assertIn("--online bing", written_service_content)
+        self.assertIn("--gnome", written_service_content)
+
+
 if __name__ == "__main__":
     unittest.main()
 

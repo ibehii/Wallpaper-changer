@@ -36,7 +36,12 @@ Designed to be lightweight and robust, it can run interactively in your terminal
 - **Safe Execution:** Uses direct `subprocess.run` list execution (no shell injection risks) and generates RFC-compliant `file:///` URIs and clean paths that properly handle spaces and special characters.
 - **Resource Efficient:** Validates images once during initialization, avoiding redundant filesystem rescans, busy-waiting, or CPU lockups.
 - **Robust Error Handling:** Skips corrupt or unreadable files, prevents freezes on empty folders, and exits cleanly upon pressing `Ctrl+C`.
-- **Flexible Logging:** Output real-time colored progress to the terminal or write structured logs to `info.log`.
+- **Online Wallpaper Sources (`--online`):** Fetch stunning wallpapers directly from popular online providers without needing local image files:
+  - **Wallhaven (`wallhaven`):** Real top-rated wallpapers from Wallhaven (`1920x1080+`).
+  - **Bing Daily Image (`bing`):** Microsoft Bing's daily curated wallpaper photo.
+  - **Picsum (`picsum`):** Random high-resolution photography from Lorem Picsum.
+  - **LoremFlickr (`loremflickr`):** Fresh nature photography from LoremFlickr.
+- **Offline & Network Resilience:** Detects network connection failures gracefully, provides user-friendly error messages, and automatically retries on subsequent cycles without crashing.
 - **Single-Pass or Continuous:** Loop forever by default or exit after cycling through all images once using `--no-repetition`.
 
 ---
@@ -216,6 +221,37 @@ GNOME 42+ allows distinct wallpapers for dark and light appearances:
 
 ---
 
+#### 6. Online Wallpapers (`--online`)
+
+Fetch wallpapers dynamically from online providers without needing local image files. Downloaded wallpapers are cached in `~/.cache/wchanger/`:
+
+- **Bing Daily Wallpaper (single run):**
+  ```bash
+  python wchanger.py --online bing --no-repetition
+  ```
+
+- **Wallhaven Top Wallpapers (rotate every 5 minutes):**
+  ```bash
+  python wchanger.py --online wallhaven -p 300
+  ```
+
+- **Picsum Random Photos in Background:**
+  ```bash
+  python wchanger.py --online picsum -b -p 60
+  ```
+
+- **LoremFlickr Nature Wallpapers:**
+  ```bash
+  python wchanger.py --online loremflickr -p 120
+  ```
+
+- **Install Systemd Startup Service with Online Wallpapers:**
+  ```bash
+  python wchanger.py --auto-start --online bing
+  ```
+
+---
+
 ## Options and Arguments Reference
 
 ### Options
@@ -223,6 +259,7 @@ GNOME 42+ allows distinct wallpapers for dark and light appearances:
 | Option | Short Flag | Accepted Values | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `--pause` | `-p` | Integer (`>= 1`) | `60` *(Interactive prompt if foreground)* | Duration in seconds between wallpaper changes. |
+| `--online` | | `wallhaven`, `bing`, `picsum`, `loremflickr` | `None` *(Uses local photos)* | Fetch wallpapers online from a provider. |
 | `--auto-start` | | Flag | `False` | Interactively configure and install a systemd startup service with root privileges. |
 | `--run-background` | `-b` | Flag | `False` | Run detached in the background with no terminal output or prompts. |
 | `--gnome` | | Flag | Auto-detect | Manually override desktop environment to GNOME. |
@@ -322,6 +359,8 @@ If the automatic `--auto-start` command failed or you prefer setting up the serv
 | Wallpapers do not visibly change on other desktops | Running on an unsupported window manager (e.g. i3, bspwm, sway without a wallpaper daemon). | Check your desktop environment via `echo $XDG_CURRENT_DESKTOP`. |
 | `Option '--pause' requires at least 1` | Zero or negative number passed to `-p`. | Specify an integer of at least 1 (e.g. `-p 10`). |
 | `PermissionError: info.log` | Current working directory is read-only when using `-o log`. | Run the script from your home directory or omit `-o log`. |
+| `[!] Network Error: Unable to connect to '<provider>'` | Computer is offline, or DNS lookup failed. | Check your internet connection. In continuous mode, the script automatically retries on the next interval. |
+| `[!] Network Error: Server returned HTTP error <code/reason>` | Remote API temporarily failed, rate-limited, or blocked the request. | Try another provider (e.g. `bing`, `picsum`, or `wallhaven`) or wait for rate limits to reset. |
 
 ---
 
