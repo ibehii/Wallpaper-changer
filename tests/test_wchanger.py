@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shlex
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
+from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 from click.testing import CliRunner
 from PIL import Image
@@ -42,8 +45,8 @@ class TestWallpaperChanger(unittest.TestCase):
         script_file = self.test_dir / "run.sh"
         script_file.write_text("#!/bin/bash\necho hi")
 
-        sub_dir = self.test_dir / "subfolder"
-        sub_dir.mkdir()
+        subdirectory = self.test_dir / "subfolder"
+        subdirectory.mkdir()
 
         result = wchanger.file_validator(self.test_dir)
         self.assertEqual(result, [])
@@ -137,9 +140,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_gnome_wallpaper_theme_dark(self, mock_run: MagicMock) -> None:
         """Dark theme should only invoke picture-uri-dark."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_gnome_wallpaper(uri, theme="dark")
+        success = wchanger.set_gnome_wallpaper(wallpaper_uri, theme="dark")
         self.assertTrue(success)
         mock_run.assert_called_once_with(
             [
@@ -147,7 +150,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 "set",
                 "org.gnome.desktop.background",
                 "picture-uri-dark",
-                uri,
+                wallpaper_uri,
             ],
             capture_output=True,
             text=True,
@@ -158,9 +161,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_gnome_wallpaper_theme_light(self, mock_run: MagicMock) -> None:
         """Light theme should only invoke picture-uri."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_gnome_wallpaper(uri, theme="light")
+        success = wchanger.set_gnome_wallpaper(wallpaper_uri, theme="light")
         self.assertTrue(success)
         mock_run.assert_called_once_with(
             [
@@ -168,7 +171,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 "set",
                 "org.gnome.desktop.background",
                 "picture-uri",
-                uri,
+                wallpaper_uri,
             ],
             capture_output=True,
             text=True,
@@ -179,9 +182,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_gnome_wallpaper_theme_both(self, mock_run: MagicMock) -> None:
         """None theme should set both picture-uri and picture-uri-dark."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_gnome_wallpaper(uri, theme=None)
+        success = wchanger.set_gnome_wallpaper(wallpaper_uri, theme=None)
         self.assertTrue(success)
         self.assertEqual(mock_run.call_count, 2)
 
@@ -189,9 +192,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_cinnamon_wallpaper(self, mock_run: MagicMock) -> None:
         """Cinnamon should invoke org.cinnamon.desktop.background picture-uri."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_cinnamon_wallpaper(uri)
+        success = wchanger.set_cinnamon_wallpaper(wallpaper_uri)
         self.assertTrue(success)
         mock_run.assert_called_once_with(
             [
@@ -199,7 +202,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 "set",
                 "org.cinnamon.desktop.background",
                 "picture-uri",
-                uri,
+                wallpaper_uri,
             ],
             capture_output=True,
             text=True,
@@ -213,9 +216,9 @@ class TestWallpaperChanger(unittest.TestCase):
     ) -> None:
         """KDE wallpaper setter should invoke evaluateScript on PlasmaShell via qdbus."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_kde_wallpaper(uri)
+        success = wchanger.set_kde_wallpaper(wallpaper_uri)
         self.assertTrue(success)
         mock_run.assert_called_once()
         command_args = mock_run.call_args[0][0]
@@ -226,15 +229,15 @@ class TestWallpaperChanger(unittest.TestCase):
         js_script = command_args[4]
         self.assertIn("desktops()", js_script)
         self.assertIn('desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");', js_script)
-        self.assertIn(f'desktop.writeConfig("Image", "{uri}");', js_script)
+        self.assertIn(f'desktop.writeConfig("Image", "{wallpaper_uri}");', js_script)
 
     @patch("subprocess.run")
     def test_set_kde_wallpaper_explicit_executable(self, mock_run: MagicMock) -> None:
         """KDE wallpaper setter should support passing explicit qdbus executable."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_kde_background(uri, qdbus_executable="qdbus6")
+        success = wchanger.set_kde_background(wallpaper_uri, qdbus_executable="qdbus6")
         self.assertTrue(success)
         command_args = mock_run.call_args[0][0]
         self.assertEqual(command_args[0], "qdbus6")
@@ -246,9 +249,9 @@ class TestWallpaperChanger(unittest.TestCase):
     ) -> None:
         """KDE wallpaper setter should return False if qdbus execution fails."""
         mock_run.return_value = MagicMock(returncode=1)
-        uri = "file:///home/user/pic.jpg"
+        wallpaper_uri = "file:///home/user/pic.jpg"
 
-        success = wchanger.set_kde_wallpaper(uri)
+        success = wchanger.set_kde_wallpaper(wallpaper_uri)
         self.assertFalse(success)
 
     @patch("wchanger.find_kde_qdbus_executable", return_value=None)
@@ -275,9 +278,9 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_find_qdbus: MagicMock, mock_platform: MagicMock
     ) -> None:
         """verify_system_requirements for KDE should exit if qdbus is missing."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("kde")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("platform.system", return_value="Linux")
     @patch("shutil.which", return_value="/usr/bin/gsettings")
@@ -293,16 +296,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_platform: MagicMock
     ) -> None:
         """verify_system_requirements for GNOME should exit if gsettings is missing."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("gnome")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("platform.system", return_value="Darwin")
     def test_verify_system_requirements_non_linux(self, mock_platform: MagicMock) -> None:
         """verify_system_requirements should exit on non-Linux platforms."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("kde")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("wchanger.set_kde_background", return_value=True)
     @patch("time.sleep")
@@ -313,7 +316,7 @@ class TestWallpaperChanger(unittest.TestCase):
         image_path = self.test_dir / "wallpaper.png"
         Image.new("RGB", (10, 10)).save(image_path)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="kde",
                 wallpapers=[str(image_path)],
@@ -321,7 +324,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 repetition=False,
                 output_mode="console",
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         expected_uri = image_path.resolve().as_uri()
         mock_set_kde.assert_called_once_with(expected_uri)
 
@@ -329,9 +332,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_setup_auto_start_missing_systemctl(self, mock_which: MagicMock) -> None:
         """setup_auto_start should exit when systemctl is missing."""
         mock_which.return_value = None
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("shutil.which", return_value="/usr/bin/systemctl")
     @patch("click.prompt")
@@ -340,15 +343,15 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start should exit with status 1 if sudo/systemctl fails."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_prompt.side_effect = [30, self.test_dir]
         mock_run.return_value = MagicMock(returncode=1)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("shutil.which")
     @patch("click.prompt")
@@ -357,16 +360,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start with desktop_override='kde' should inject --kde into ExecStart."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [45, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="kde")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         # First subprocess call is sudo tee to write the service definition
         tee_call = mock_run.call_args_list[0]
@@ -386,16 +389,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_which: MagicMock,
     ) -> None:
         """setup_auto_start should include --kde when KDE is auto-detected."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -411,8 +414,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_theme_notice_on_kde(self) -> None:
         """cli with --kde and --theme should notify the user that theme applies only to GNOME."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle"):
@@ -425,8 +428,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_plasma_flag_alias(self) -> None:
         """cli should accept --plasma as an alias for --kde."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle") as mock_cycle:
@@ -442,8 +445,8 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("os.fork", return_value=12345)
     def test_cli_run_background_kde(self, mock_fork: MagicMock) -> None:
         """cli with --run-background and --kde should announce KDE Plasma mode."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.find_kde_qdbus_executable", return_value="qdbus"):
@@ -469,12 +472,12 @@ class TestWallpaperChanger(unittest.TestCase):
             ({"XDG_CURRENT_DESKTOP": "i3", "DESKTOP_SESSION": "i3"}, None),
             ({"XDG_CURRENT_DESKTOP": "bspwm", "DESKTOP_SESSION": "bspwm"}, None),
         ]
-        for env_dict, expected_result in test_cases:
-            with patch.dict(os.environ, env_dict, clear=True):
+        for environment_variables, expected_result in test_cases:
+            with patch.dict(os.environ, environment_variables, clear=True):
                 self.assertEqual(
                     wchanger.detect_desktop_environment(),
                     expected_result,
-                    msg=f"Failed for env {env_dict}",
+                    msg=f"Failed for env {environment_variables}",
                 )
 
     @patch("wchanger.find_kde_qdbus_executable", return_value="qdbus")
@@ -484,12 +487,12 @@ class TestWallpaperChanger(unittest.TestCase):
     ) -> None:
         """set_kde_wallpaper should format paths with spaces and special characters properly."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/My%20Photos/wallpaper%20(1).jpg"
+        wallpaper_uri = "file:///home/user/My%20Photos/wallpaper%20(1).jpg"
 
-        success = wchanger.set_kde_wallpaper(uri)
+        success = wchanger.set_kde_wallpaper(wallpaper_uri)
         self.assertTrue(success)
         command_args = mock_run.call_args[0][0]
-        self.assertIn(f'desktop.writeConfig("Image", "{uri}");', command_args[4])
+        self.assertIn(f'desktop.writeConfig("Image", "{wallpaper_uri}");', command_args[4])
 
 
     @patch("wchanger.find_kde_qdbus_executable", return_value="qdbus")
@@ -529,16 +532,16 @@ class TestWallpaperChanger(unittest.TestCase):
         """setup_auto_start should safely quote directory paths containing spaces in ExecStart."""
         folder_with_spaces = self.test_dir / "Wallpapers Folder"
         folder_with_spaces.mkdir()
-        img_file = folder_with_spaces / "wallpaper.jpg"
-        Image.new("RGB", (5, 5)).save(img_file)
+        image_file = folder_with_spaces / "wallpaper.jpg"
+        Image.new("RGB", (5, 5)).save(image_file)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, folder_with_spaces]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="kde")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -558,17 +561,17 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_isatty: MagicMock,
     ) -> None:
         """setup_auto_start should prompt for desktop environment if auto-detection returns None."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         # Prompt sequence: pause duration, photo directory, desktop environment choice
         mock_prompt.side_effect = [30, self.test_dir, "kde"]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -586,15 +589,15 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_isatty: MagicMock,
     ) -> None:
         """setup_auto_start without a TTY should fail cleanly if desktop cannot be detected."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [30, self.test_dir]
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("os.fork", return_value=0)
     @patch("os.setsid")
@@ -614,8 +617,8 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_fork: MagicMock,
     ) -> None:
         """In background mode, the child process (fork==0) sets sid and runs wallpaper cycle without second fork."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -725,8 +728,8 @@ class TestWallpaperChanger(unittest.TestCase):
             MagicMock(returncode=0, stdout="/backdrop/screen0/monitor0/workspace0/last-image\n"),
             MagicMock(returncode=0),
         ]
-        uri = "file:///home/user/My%20Wallpapers/pic%20(1).jpg"
-        result = wchanger.set_xfce_wallpaper(uri)
+        wallpaper_uri = "file:///home/user/My%20Wallpapers/pic%20(1).jpg"
+        result = wchanger.set_xfce_wallpaper(wallpaper_uri)
         self.assertTrue(result)
         second_call = mock_run.call_args_list[1]
         self.assertEqual(second_call[0][0][-1], "/home/user/My Wallpapers/pic (1).jpg")
@@ -762,9 +765,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_mate_wallpaper_converts_file_uri(self, mock_run: MagicMock) -> None:
         """MATE setter should convert file:// URI to local file path."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/Nature%20Photos/forest.png"
+        wallpaper_uri = "file:///home/user/Nature%20Photos/forest.png"
 
-        result = wchanger.set_mate_wallpaper(uri)
+        result = wchanger.set_mate_wallpaper(wallpaper_uri)
         self.assertTrue(result)
         mock_run.assert_called_once_with(
             ["gsettings", "set", "org.mate.background", "picture-filename", "/home/user/Nature Photos/forest.png"],
@@ -804,9 +807,9 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_lxqt_wallpaper_converts_file_uri(self, mock_run: MagicMock) -> None:
         """LXQt setter should convert file:// URI to local file path."""
         mock_run.return_value = MagicMock(returncode=0)
-        uri = "file:///home/user/Abstract%20Art/minimal.webp"
+        wallpaper_uri = "file:///home/user/Abstract%20Art/minimal.webp"
 
-        result = wchanger.set_lxqt_wallpaper(uri)
+        result = wchanger.set_lxqt_wallpaper(wallpaper_uri)
         self.assertTrue(result)
         mock_run.assert_called_once_with(
             ["pcmanfm-qt", "--set-wallpaper=/home/user/Abstract Art/minimal.webp"],
@@ -834,9 +837,9 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_platform: MagicMock
     ) -> None:
         """verify_system_requirements for XFCE should exit when xfconf-query is missing."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("xfce")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("platform.system", return_value="Linux")
     @patch("shutil.which", return_value="/usr/bin/gsettings")
@@ -852,9 +855,9 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_platform: MagicMock
     ) -> None:
         """verify_system_requirements for MATE should exit when gsettings is missing."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("mate")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     @patch("platform.system", return_value="Linux")
     @patch("shutil.which", return_value="/usr/bin/pcmanfm-qt")
@@ -870,9 +873,9 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_platform: MagicMock
     ) -> None:
         """verify_system_requirements for LXQt should exit when pcmanfm-qt is missing."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("lxqt")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     # run_wallpaper_cycle Tests for XFCE, MATE, LXQt
     @patch("wchanger.set_xfce_background", return_value=True)
@@ -884,7 +887,7 @@ class TestWallpaperChanger(unittest.TestCase):
         image_path = self.test_dir / "wallpaper.png"
         Image.new("RGB", (10, 10)).save(image_path)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="xfce",
                 wallpapers=[str(image_path)],
@@ -892,7 +895,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 repetition=False,
                 output_mode="console",
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_set_xfce.assert_called_once_with(str(image_path))
 
     @patch("wchanger.set_mate_background", return_value=True)
@@ -904,7 +907,7 @@ class TestWallpaperChanger(unittest.TestCase):
         image_path = self.test_dir / "wallpaper.png"
         Image.new("RGB", (10, 10)).save(image_path)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="mate",
                 wallpapers=[str(image_path)],
@@ -912,7 +915,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 repetition=False,
                 output_mode="console",
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_set_mate.assert_called_once_with(str(image_path))
 
     @patch("wchanger.set_lxqt_background", return_value=True)
@@ -924,7 +927,7 @@ class TestWallpaperChanger(unittest.TestCase):
         image_path = self.test_dir / "wallpaper.png"
         Image.new("RGB", (10, 10)).save(image_path)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="lxqt",
                 wallpapers=[str(image_path)],
@@ -932,7 +935,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 repetition=False,
                 output_mode="console",
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_set_lxqt.assert_called_once_with(str(image_path))
 
     # CLI Tests for XFCE, MATE, LXQt
@@ -950,8 +953,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_xfce_flag(self) -> None:
         """cli with --xfce should dispatch to xfce desktop environment."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle") as mock_cycle:
@@ -966,8 +969,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_mate_flag(self) -> None:
         """cli with --mate should dispatch to mate desktop environment."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle") as mock_cycle:
@@ -982,8 +985,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_lxqt_flag(self) -> None:
         """cli with --lxqt should dispatch to lxqt desktop environment."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle") as mock_cycle:
@@ -998,8 +1001,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_theme_notice_on_xfce(self) -> None:
         """cli with --xfce and --theme should notify the user that theme applies only to GNOME."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle"):
@@ -1012,8 +1015,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_theme_notice_on_mate(self) -> None:
         """cli with --mate and --theme should notify the user that theme applies only to GNOME."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle"):
@@ -1026,8 +1029,8 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cli_theme_notice_on_lxqt(self) -> None:
         """cli with --lxqt and --theme should notify the user that theme applies only to GNOME."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle"):
@@ -1041,8 +1044,8 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("os.fork", return_value=12345)
     def test_cli_run_background_xfce(self, mock_fork: MagicMock) -> None:
         """cli with --run-background and --xfce should announce XFCE mode."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("shutil.which", return_value="/usr/bin/xfconf-query"):
@@ -1057,8 +1060,8 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("os.fork", return_value=12345)
     def test_cli_run_background_mate(self, mock_fork: MagicMock) -> None:
         """cli with --run-background and --mate should announce MATE mode."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("shutil.which", return_value="/usr/bin/gsettings"):
@@ -1073,8 +1076,8 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("os.fork", return_value=12345)
     def test_cli_run_background_lxqt(self, mock_fork: MagicMock) -> None:
         """cli with --run-background and --lxqt should announce LXQt mode."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("shutil.which", return_value="/usr/bin/pcmanfm-qt"):
@@ -1094,16 +1097,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start with desktop_override='xfce' should inject --xfce into ExecStart."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="xfce")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1116,16 +1119,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start with desktop_override='mate' should inject --mate into ExecStart."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="mate")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1138,16 +1141,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start with desktop_override='lxqt' should inject --lxqt into ExecStart."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="lxqt")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1165,16 +1168,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_which: MagicMock,
     ) -> None:
         """setup_auto_start should include --xfce when XFCE is auto-detected."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1194,16 +1197,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_isatty: MagicMock,
     ) -> None:
         """setup_auto_start should allow picking mate when prompted."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [30, self.test_dir, "mate"]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1221,16 +1224,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_which: MagicMock,
     ) -> None:
         """setup_auto_start should include --mate when MATE is auto-detected."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1248,16 +1251,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_which: MagicMock,
     ) -> None:
         """setup_auto_start should include --lxqt when LXQt is auto-detected."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1315,14 +1318,14 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("platform.system", return_value="Linux")
     def test_verify_system_requirements_unsupported_desktop(self, mock_platform: MagicMock) -> None:
         """verify_system_requirements should exit with code 1 for unsupported desktop."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.verify_system_requirements("unknown_de")
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     def test_cli_xfce4_flag_alias(self) -> None:
         """cli should accept --xfce4 as an alias for --xfce."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         with patch("wchanger.run_wallpaper_cycle") as mock_cycle:
@@ -1349,16 +1352,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_isatty: MagicMock,
     ) -> None:
         """setup_auto_start should allow picking xfce when prompted."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [30, self.test_dir, "xfce"]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1378,16 +1381,16 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_isatty: MagicMock,
     ) -> None:
         """setup_auto_start should allow picking lxqt when prompted."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [30, self.test_dir, "lxqt"]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start()
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1400,17 +1403,17 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start should include WorkingDirectory and Environment=DISPLAY in service definition."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
         with patch.dict(os.environ, {"DISPLAY": ":1", "WAYLAND_DISPLAY": "wayland-0"}, clear=False):
-            with self.assertRaises(SystemExit) as cm:
+            with self.assertRaises(SystemExit) as exception_context:
                 wchanger.setup_auto_start(desktop_override="lxqt")
-            self.assertEqual(cm.exception.code, 0)
+            self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1425,16 +1428,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start should omit -t when target desktop is not GNOME."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="xfce", color_theme="dark")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1447,16 +1450,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
         """setup_auto_start should include -t when target desktop is GNOME."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_which.side_effect = lambda name: f"/usr/bin/{name}"
         mock_prompt.side_effect = [60, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="gnome", color_theme="dark")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1465,40 +1468,40 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("time.sleep")
     def test_run_wallpaper_cycle_skips_missing_file(self, mock_sleep: MagicMock) -> None:
         """run_wallpaper_cycle should skip files that do not exist."""
-        real_img = self.test_dir / "exists.png"
-        Image.new("RGB", (5, 5)).save(real_img)
-        missing_img = self.test_dir / "nonexistent.png"
+        real_image = self.test_dir / "exists.png"
+        Image.new("RGB", (5, 5)).save(real_image)
+        missing_image = self.test_dir / "nonexistent.png"
 
         with patch("wchanger.set_xfce_background", return_value=True) as mock_set:
-            with self.assertRaises(SystemExit) as cm:
+            with self.assertRaises(SystemExit) as exception_context:
                 wchanger.run_wallpaper_cycle(
                     desktop_environment="xfce",
-                    wallpapers=[str(missing_img), str(real_img)],
+                    wallpapers=[str(missing_image), str(real_image)],
                     pause_seconds=1,
                     repetition=False,
                     output_mode="console",
                 )
-            self.assertEqual(cm.exception.code, 0)
-            mock_set.assert_called_once_with(str(real_img))
+            self.assertEqual(exception_context.exception.code, 0)
+            mock_set.assert_called_once_with(str(real_image))
 
     @patch("time.sleep")
     def test_run_wallpaper_cycle_logging_mode(self, mock_sleep: MagicMock) -> None:
         """run_wallpaper_cycle in log output mode should emit log records."""
-        img = self.test_dir / "wallpaper.png"
-        Image.new("RGB", (5, 5)).save(img)
+        test_image = self.test_dir / "wallpaper.png"
+        Image.new("RGB", (5, 5)).save(test_image)
 
         with patch("wchanger.set_mate_background", return_value=True):
-            with patch("logging.info") as mock_log_info:
-                with self.assertRaises(SystemExit) as cm:
+            with patch("logging.info") as mock_logging_info:
+                with self.assertRaises(SystemExit) as exception_context:
                     wchanger.run_wallpaper_cycle(
                         desktop_environment="mate",
-                        wallpapers=[str(img)],
+                        wallpapers=[str(test_image)],
                         pause_seconds=1,
                         repetition=False,
                         output_mode="log",
                     )
-                self.assertEqual(cm.exception.code, 0)
-                mock_log_info.assert_any_call(f"Wallpaper changed on MATE to {img}.")
+                self.assertEqual(exception_context.exception.code, 0)
+                mock_logging_info.assert_any_call(f"Wallpaper changed on MATE to {test_image}.")
 
     def test_configure_logging_creates_handler(self) -> None:
         """configure_logging with 'log' mode should add a FileHandler."""
@@ -1506,7 +1509,11 @@ class TestWallpaperChanger(unittest.TestCase):
         wchanger.configure_logging("log", log_file_path=log_file)
         import logging
         root_logger = logging.getLogger()
-        handler_found = any(isinstance(h, logging.FileHandler) and Path(h.baseFilename) == log_file.resolve() for h in root_logger.handlers)
+        handler_found = any(
+            isinstance(logging_handler, logging.FileHandler)
+            and Path(logging_handler.baseFilename) == log_file.resolve()
+            for logging_handler in root_logger.handlers
+        )
         self.assertTrue(handler_found)
 
     @patch("subprocess.run")
@@ -1563,8 +1570,8 @@ class TestWallpaperChanger(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         mock_urlopen.return_value = fake_response
 
-        url = wchanger.fetch_wallhaven_url()
-        self.assertEqual(url, "https://w.wallhaven.cc/full/abc.jpg")
+        wallpaper_url = wchanger.fetch_wallhaven_url()
+        self.assertEqual(wallpaper_url, "https://w.wallhaven.cc/full/abc.jpg")
 
     @patch("wchanger.urlopen")
     def test_fetch_wallhaven_url_empty_data(self, mock_urlopen: MagicMock) -> None:
@@ -1574,9 +1581,9 @@ class TestWallpaperChanger(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         mock_urlopen.return_value = fake_response
 
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaises(ValueError) as exception_context:
             wchanger.fetch_wallhaven_url()
-        self.assertIn("No wallpapers found", str(cm.exception))
+        self.assertIn("No wallpapers found", str(exception_context.exception))
 
     @patch("wchanger.urlopen")
     def test_fetch_wallhaven_url_missing_path(self, mock_urlopen: MagicMock) -> None:
@@ -1586,9 +1593,9 @@ class TestWallpaperChanger(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         mock_urlopen.return_value = fake_response
 
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaises(ValueError) as exception_context:
             wchanger.fetch_wallhaven_url()
-        self.assertIn("Wallhaven entry missing image path", str(cm.exception))
+        self.assertIn("Wallhaven entry missing image path", str(exception_context.exception))
 
     @patch("wchanger.urlopen")
     def test_fetch_bing_url_success(self, mock_urlopen: MagicMock) -> None:
@@ -1600,8 +1607,8 @@ class TestWallpaperChanger(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         mock_urlopen.return_value = fake_response
 
-        url = wchanger.fetch_bing_url()
-        self.assertEqual(url, "https://www.bing.com/th?id=OHR.SampleBing_EN-US_1920x1080.jpg")
+        wallpaper_url = wchanger.fetch_bing_url()
+        self.assertEqual(wallpaper_url, "https://www.bing.com/th?id=OHR.SampleBing_EN-US_1920x1080.jpg")
 
     @patch("wchanger.urlopen")
     def test_fetch_bing_url_empty_images(self, mock_urlopen: MagicMock) -> None:
@@ -1611,19 +1618,19 @@ class TestWallpaperChanger(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         mock_urlopen.return_value = fake_response
 
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaises(ValueError) as exception_context:
             wchanger.fetch_bing_url()
-        self.assertIn("No images found", str(cm.exception))
+        self.assertIn("No images found", str(exception_context.exception))
 
     def test_fetch_picsum_url(self) -> None:
         """fetch_picsum_url should return a 1920x1080 random URL."""
-        url = wchanger.fetch_picsum_url()
-        self.assertTrue(url.startswith("https://picsum.photos/1920/1080?random="))
+        wallpaper_url = wchanger.fetch_picsum_url()
+        self.assertTrue(wallpaper_url.startswith("https://picsum.photos/1920/1080?random="))
 
     def test_fetch_loremflickr_url(self) -> None:
         """fetch_loremflickr_url should return a 1920x1080 nature lock URL."""
-        url = wchanger.fetch_loremflickr_url()
-        self.assertTrue(url.startswith("https://loremflickr.com/1920/1080/nature?lock="))
+        wallpaper_url = wchanger.fetch_loremflickr_url()
+        self.assertTrue(wallpaper_url.startswith("https://loremflickr.com/1920/1080/nature?lock="))
 
     @patch("wchanger.urlopen")
     def test_download_online_wallpaper_success(self, mock_urlopen: MagicMock) -> None:
@@ -1649,25 +1656,25 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_urlopen.return_value = fake_response
 
         dest_file = self.test_dir / "cache" / "wallpaper_empty.jpg"
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaises(ValueError) as exception_context:
             wchanger.download_online_wallpaper("https://example.com/image.jpg", dest_file)
-        self.assertIn("Received empty image content", str(cm.exception))
+        self.assertIn("Received empty image content", str(exception_context.exception))
 
     def test_format_network_error_http(self) -> None:
         """format_network_error should format HTTPError with status code."""
         from urllib.error import HTTPError
         error = HTTPError("https://example.com", 404, "Not Found", {}, None)
-        msg = wchanger.format_network_error("bing", error)
-        self.assertIn("404", msg)
-        self.assertIn("bing", msg)
+        error_message = wchanger.format_network_error("bing", error)
+        self.assertIn("404", error_message)
+        self.assertIn("bing", error_message)
 
     def test_format_network_error_url(self) -> None:
         """format_network_error should format URLError advising connection check."""
         from urllib.error import URLError
         error = URLError("Temporary failure in name resolution")
-        msg = wchanger.format_network_error("wallhaven", error)
-        self.assertIn("check your internet connection", msg)
-        self.assertIn("wallhaven", msg)
+        error_message = wchanger.format_network_error("wallhaven", error)
+        self.assertIn("check your internet connection", error_message)
+        self.assertIn("wallhaven", error_message)
 
     @patch("wchanger.set_gnome_background", return_value=True)
     @patch("wchanger.set_cinnamon_background", return_value=True)
@@ -1689,32 +1696,32 @@ class TestWallpaperChanger(unittest.TestCase):
         sample_file.write_bytes(b"data")
 
         # GNOME
-        success, msg = wchanger.set_wallpaper_for_desktop("gnome", sample_file, "dark")
+        success, error_message = wchanger.set_wallpaper_for_desktop("gnome", sample_file, "dark")
         self.assertTrue(success)
         mock_gnome.assert_called_once_with(sample_file.resolve().as_uri(), "dark")
 
         # Cinnamon
-        success, msg = wchanger.set_wallpaper_for_desktop("cinnamon", sample_file)
+        success, error_message = wchanger.set_wallpaper_for_desktop("cinnamon", sample_file)
         self.assertTrue(success)
         mock_cinnamon.assert_called_once_with(sample_file.resolve().as_uri())
 
         # KDE
-        success, msg = wchanger.set_wallpaper_for_desktop("kde", sample_file)
+        success, error_message = wchanger.set_wallpaper_for_desktop("kde", sample_file)
         self.assertTrue(success)
         mock_kde.assert_called_once_with(sample_file.resolve().as_uri())
 
         # XFCE
-        success, msg = wchanger.set_wallpaper_for_desktop("xfce", sample_file)
+        success, error_message = wchanger.set_wallpaper_for_desktop("xfce", sample_file)
         self.assertTrue(success)
         mock_xfce.assert_called_once_with(str(sample_file))
 
         # MATE
-        success, msg = wchanger.set_wallpaper_for_desktop("mate", sample_file)
+        success, error_message = wchanger.set_wallpaper_for_desktop("mate", sample_file)
         self.assertTrue(success)
         mock_mate.assert_called_once_with(str(sample_file))
 
         # LXQt
-        success, msg = wchanger.set_wallpaper_for_desktop("lxqt", sample_file)
+        success, error_message = wchanger.set_wallpaper_for_desktop("lxqt", sample_file)
         self.assertTrue(success)
         mock_lxqt.assert_called_once_with(str(sample_file))
 
@@ -1731,7 +1738,7 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_fetcher = MagicMock(return_value="https://example.com/wallpaper.jpg")
         mock_providers.get.return_value = mock_fetcher
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_online_wallpaper_cycle(
                 desktop_environment="gnome",
                 provider="bing",
@@ -1740,7 +1747,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 output_mode="console",
                 cache_dir=self.test_dir,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_fetcher.assert_called_once()
         mock_download.assert_called_once()
         mock_setter.assert_called_once()
@@ -1754,7 +1761,7 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_fetcher = MagicMock(side_effect=URLError("DNS resolution failed"))
         mock_providers.get.return_value = mock_fetcher
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_online_wallpaper_cycle(
                 desktop_environment="gnome",
                 provider="wallhaven",
@@ -1763,11 +1770,11 @@ class TestWallpaperChanger(unittest.TestCase):
                 output_mode="console",
                 cache_dir=self.test_dir,
             )
-        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(exception_context.exception.code, 1)
 
     def test_run_online_wallpaper_cycle_unknown_provider(self) -> None:
         """run_online_wallpaper_cycle should raise ValueError on invalid provider name."""
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaises(ValueError) as exception_context:
             wchanger.run_online_wallpaper_cycle(
                 desktop_environment="gnome",
                 provider="nonexistent_provider",
@@ -1775,7 +1782,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 repetition=False,
                 output_mode="console",
             )
-        self.assertIn("Unknown online provider", str(cm.exception))
+        self.assertIn("Unknown online provider", str(exception_context.exception))
 
     def test_cli_help_includes_online(self) -> None:
         """cli --help should list the --online option with all supported providers."""
@@ -1833,9 +1840,9 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_prompt.return_value = 60
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(desktop_override="gnome", online_provider="bing")
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -1892,22 +1899,22 @@ class TestWallpaperChanger(unittest.TestCase):
     # Recursive Directory Scanning Tests
     def test_file_validator_recursive(self) -> None:
         """file_validator should only find subfolder images when recursive=True."""
-        top_img = self.test_dir / "top.png"
-        Image.new("RGB", (10, 10)).save(top_img)
+        top_level_image = self.test_dir / "top.png"
+        Image.new("RGB", (10, 10)).save(top_level_image)
 
-        sub_dir = self.test_dir / "nested" / "sub"
-        sub_dir.mkdir(parents=True)
-        nested_img = sub_dir / "nested.jpg"
-        Image.new("RGB", (10, 10)).save(nested_img)
+        subdirectory = self.test_dir / "nested" / "sub"
+        subdirectory.mkdir(parents=True)
+        nested_image = subdirectory / "nested.jpg"
+        Image.new("RGB", (10, 10)).save(nested_image)
 
         non_recursive_results = wchanger.file_validator(self.test_dir, recursive=False)
         self.assertEqual(len(non_recursive_results), 1)
-        self.assertEqual(non_recursive_results[0], str(top_img.resolve()))
+        self.assertEqual(non_recursive_results[0], str(top_level_image.resolve()))
 
         recursive_results = wchanger.file_validator(self.test_dir, recursive=True)
         self.assertEqual(len(recursive_results), 2)
-        self.assertIn(str(top_img.resolve()), recursive_results)
-        self.assertIn(str(nested_img.resolve()), recursive_results)
+        self.assertIn(str(top_level_image.resolve()), recursive_results)
+        self.assertIn(str(nested_image.resolve()), recursive_results)
 
     # Shuffle Tests
     @patch("random.shuffle")
@@ -1916,19 +1923,19 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_setter: MagicMock, mock_shuffle: MagicMock
     ) -> None:
         """run_wallpaper_cycle should call random.shuffle when shuffle=True."""
-        img_path = self.test_dir / "img1.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "img1.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="gnome",
-                wallpapers=[str(img_path)],
+                wallpapers=[str(image_path)],
                 pause_seconds=1,
                 repetition=False,
                 output_mode="console",
                 shuffle=True,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_shuffle.assert_called_once()
 
     @patch("random.shuffle")
@@ -1937,19 +1944,19 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_setter: MagicMock, mock_shuffle: MagicMock
     ) -> None:
         """run_wallpaper_cycle should not call random.shuffle when shuffle=False."""
-        img_path = self.test_dir / "img1.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "img1.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="gnome",
-                wallpapers=[str(img_path)],
+                wallpapers=[str(image_path)],
                 pause_seconds=1,
                 repetition=False,
                 output_mode="console",
                 shuffle=False,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_shuffle.assert_not_called()
 
     # CLI Tests for Shuffle, Time Units, and Recursive
@@ -1959,8 +1966,8 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """cli with --pause 10m should pass pause_seconds=600 to run_wallpaper_cycle."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -1977,8 +1984,8 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """cli with --shuffle and -s should activate shuffle mode."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -2002,10 +2009,10 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """cli with --recursive and -R should find nested subfolder wallpapers."""
-        sub = self.test_dir / "nested"
-        sub.mkdir()
-        sub_img = sub / "nested.png"
-        Image.new("RGB", (5, 5)).save(sub_img)
+        subfolder = self.test_dir / "nested"
+        subfolder.mkdir()
+        subfolder_image = subfolder / "nested.png"
+        Image.new("RGB", (5, 5)).save(subfolder_image)
 
         runner = CliRunner()
         result_fail = runner.invoke(
@@ -2020,7 +2027,7 @@ class TestWallpaperChanger(unittest.TestCase):
         )
         self.assertEqual(result_success.exit_code, 0)
         mock_cycle.assert_called_once()
-        self.assertIn(str(sub_img.resolve()), mock_cycle.call_args.kwargs["wallpapers"])
+        self.assertIn(str(subfolder_image.resolve()), mock_cycle.call_args.kwargs["wallpapers"])
 
         mock_cycle.reset_mock()
         result_short = runner.invoke(
@@ -2029,7 +2036,7 @@ class TestWallpaperChanger(unittest.TestCase):
         )
         self.assertEqual(result_short.exit_code, 0)
         mock_cycle.assert_called_once()
-        self.assertIn(str(sub_img.resolve()), mock_cycle.call_args.kwargs["wallpapers"])
+        self.assertIn(str(subfolder_image.resolve()), mock_cycle.call_args.kwargs["wallpapers"])
 
     @patch("shutil.which", return_value="/usr/bin/systemctl")
     @patch("click.prompt")
@@ -2041,19 +2048,19 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_which: MagicMock,
     ) -> None:
         """setup_auto_start should include -s and -R when shuffle and recursive are specified."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
         mock_prompt.side_effect = [120, self.test_dir]
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_auto_start(
                 desktop_override="gnome",
                 shuffle=True,
                 recursive=True,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -2128,12 +2135,12 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_cleanup_download_cache_empty_or_missing(self) -> None:
         """cleanup_download_cache should handle non-existent or empty directories safely."""
-        missing_dir = self.test_dir / "missing_cache"
-        self.assertEqual(wchanger.cleanup_download_cache(missing_dir), [])
+        missing_directory = self.test_dir / "missing_cache"
+        self.assertEqual(wchanger.cleanup_download_cache(missing_directory), [])
 
-        empty_dir = self.test_dir / "empty_cache"
-        empty_dir.mkdir()
-        self.assertEqual(wchanger.cleanup_download_cache(empty_dir), [])
+        empty_directory = self.test_dir / "empty_cache"
+        empty_directory.mkdir()
+        self.assertEqual(wchanger.cleanup_download_cache(empty_directory), [])
 
     def test_cleanup_download_cache_prunes_old_files(self) -> None:
         """cleanup_download_cache should delete the oldest files when count exceeds keep_last."""
@@ -2143,22 +2150,22 @@ class TestWallpaperChanger(unittest.TestCase):
         created_paths = []
         base_time = 1700000000.0
         for index in range(25):
-            img_path = cache_dir / f"wallpaper_test_{index:02d}.jpg"
-            img_path.write_bytes(b"dummy image data")
+            image_path = cache_dir / f"wallpaper_test_{index:02d}.jpg"
+            image_path.write_bytes(b"dummy image data")
             timestamp = base_time + (index * 10)
-            os.utime(img_path, (timestamp, timestamp))
-            created_paths.append(img_path)
+            os.utime(image_path, (timestamp, timestamp))
+            created_paths.append(image_path)
 
         pruned = wchanger.cleanup_download_cache(cache_dir, keep_last=20)
         self.assertEqual(len(pruned), 5)
-        expected_pruned_names = {f"wallpaper_test_{idx:02d}.jpg" for idx in range(5)}
-        actual_pruned_names = {p.name for p in pruned}
+        expected_pruned_names = {f"wallpaper_test_{wallpaper_index:02d}.jpg" for wallpaper_index in range(5)}
+        actual_pruned_names = {candidate_wallpaper_path.name for candidate_wallpaper_path in pruned}
         self.assertEqual(actual_pruned_names, expected_pruned_names)
 
-        remaining_files = [p.name for p in cache_dir.iterdir() if p.is_file()]
+        remaining_files = [candidate_wallpaper_path.name for candidate_wallpaper_path in cache_dir.iterdir() if candidate_wallpaper_path.is_file()]
         self.assertEqual(len(remaining_files), 20)
-        for idx in range(5, 25):
-            self.assertIn(f"wallpaper_test_{idx:02d}.jpg", remaining_files)
+        for wallpaper_index in range(5, 25):
+            self.assertIn(f"wallpaper_test_{wallpaper_index:02d}.jpg", remaining_files)
 
     def test_cleanup_download_cache_custom_keep_last(self) -> None:
         """cleanup_download_cache should respect custom keep_last values."""
@@ -2167,9 +2174,9 @@ class TestWallpaperChanger(unittest.TestCase):
 
         base_time = 1700000000.0
         for index in range(10):
-            img_path = cache_dir / f"wall_{index}.png"
-            img_path.write_bytes(b"data")
-            os.utime(img_path, (base_time + index, base_time + index))
+            image_path = cache_dir / f"wall_{index}.png"
+            image_path.write_bytes(b"data")
+            os.utime(image_path, (base_time + index, base_time + index))
 
         pruned = wchanger.cleanup_download_cache(cache_dir, keep_last=3)
         self.assertEqual(len(pruned), 7)
@@ -2186,9 +2193,9 @@ class TestWallpaperChanger(unittest.TestCase):
 
         base_time = 1700000000.0
         for index in range(5):
-            img_path = cache_dir / f"wall_{index}.jpg"
-            img_path.write_bytes(b"data")
-            os.utime(img_path, (base_time + index, base_time + index))
+            image_path = cache_dir / f"wall_{index}.jpg"
+            image_path.write_bytes(b"data")
+            os.utime(image_path, (base_time + index, base_time + index))
 
         pruned = wchanger.cleanup_download_cache(cache_dir, keep_last=3)
         self.assertEqual(len(pruned), 2)
@@ -2200,11 +2207,11 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """cli should load options from custom --config file."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        custom_cfg = self.test_dir / "my_custom.toml"
-        custom_cfg.write_text(
+        custom_config_file = self.test_dir / "my_custom.toml"
+        custom_config_file.write_text(
             f'pause = "5m"\n'
             f'shuffle = true\n'
             f'folder = "{self.test_dir}"\n'
@@ -2214,7 +2221,7 @@ class TestWallpaperChanger(unittest.TestCase):
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
-            ["--config", str(custom_cfg), "--gnome"],
+            ["--config", str(custom_config_file), "--gnome"],
         )
         self.assertEqual(result.exit_code, 0)
         mock_cycle.assert_called_once()
@@ -2227,11 +2234,11 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """CLI arguments should override values specified in config file."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        custom_cfg = self.test_dir / "override.toml"
-        custom_cfg.write_text(
+        custom_config_file = self.test_dir / "override.toml"
+        custom_config_file.write_text(
             f'pause = 600\n'
             f'shuffle = true\n'
             f'folder = "{self.test_dir}"\n'
@@ -2240,7 +2247,7 @@ class TestWallpaperChanger(unittest.TestCase):
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
-            ["--config", str(custom_cfg), "--gnome", "-p", "15", "--no-shuffle"],
+            ["--config", str(custom_config_file), "--gnome", "-p", "15", "--no-shuffle"],
         )
         self.assertEqual(result.exit_code, 0)
         mock_cycle.assert_called_once()
@@ -2253,16 +2260,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """--no-config should ignore any configuration file."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        custom_cfg = self.test_dir / "ignored.toml"
-        custom_cfg.write_text('shuffle = true\n')
+        custom_config_file = self.test_dir / "ignored.toml"
+        custom_config_file.write_text('shuffle = true\n')
 
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
-            ["--config", str(custom_cfg), "--no-config", "--gnome", "-p", "10", str(self.test_dir)],
+            ["--config", str(custom_config_file), "--no-config", "--gnome", "-p", "10", str(self.test_dir)],
         )
         self.assertEqual(result.exit_code, 0)
         mock_cycle.assert_called_once()
@@ -2274,8 +2281,8 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_online: MagicMock
     ) -> None:
         """config with source = 'bing' should dispatch to online cycle when no folder is passed."""
-        custom_cfg = self.test_dir / "online_cfg.toml"
-        custom_cfg.write_text(
+        custom_config_file = self.test_dir / "online_cfg.toml"
+        custom_config_file.write_text(
             'source = "bing"\n'
             'pause = 120\n'
             'keep_last = 10\n'
@@ -2285,7 +2292,7 @@ class TestWallpaperChanger(unittest.TestCase):
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
-            ["--config", str(custom_cfg), "--gnome"],
+            ["--config", str(custom_config_file), "--gnome"],
         )
         self.assertEqual(result.exit_code, 0)
         mock_online.assert_called_once()
@@ -2299,16 +2306,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """Passing an explicit folder on CLI should override source = 'wallhaven' in config."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        custom_cfg = self.test_dir / "source_override.toml"
-        custom_cfg.write_text('source = "wallhaven"\n')
+        custom_config_file = self.test_dir / "source_override.toml"
+        custom_config_file.write_text('source = "wallhaven"\n')
 
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
-            ["--config", str(custom_cfg), "--gnome", "-p", "10", str(self.test_dir)],
+            ["--config", str(custom_config_file), "--gnome", "-p", "10", str(self.test_dir)],
         )
         self.assertEqual(result.exit_code, 0)
         mock_cycle.assert_called_once()
@@ -2334,16 +2341,16 @@ class TestWallpaperChanger(unittest.TestCase):
         self, mock_which: MagicMock, mock_cycle: MagicMock
     ) -> None:
         """--source folder should force local folder mode even if config specifies online."""
-        img_path = self.test_dir / "test.png"
-        Image.new("RGB", (5, 5)).save(img_path)
+        image_path = self.test_dir / "test.png"
+        Image.new("RGB", (5, 5)).save(image_path)
 
-        custom_cfg = self.test_dir / "force_folder.toml"
-        custom_cfg.write_text(f'source = "wallhaven"\nfolder = "{self.test_dir}"\n')
+        custom_config_file = self.test_dir / "force_folder.toml"
+        custom_config_file.write_text(f'source = "wallhaven"\nfolder = "{self.test_dir}"\n')
 
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
-            ["--config", str(custom_cfg), "--source", "folder", "--gnome", "-p", "10"],
+            ["--config", str(custom_config_file), "--source", "folder", "--gnome", "-p", "10"],
         )
         self.assertEqual(result.exit_code, 0)
         mock_cycle.assert_called_once()
@@ -2374,13 +2381,13 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_prompt.return_value = 60
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_install_autostart_service(
                 desktop_override="gnome",
                 online_provider="wallhaven",
                 keep_last=12,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
 
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
@@ -2399,7 +2406,7 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_cleanup: MagicMock,
     ) -> None:
         """run_online_wallpaper_cycle should invoke cleanup_download_cache after setting wallpaper."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_online_wallpaper_cycle(
                 desktop_environment="gnome",
                 provider="picsum",
@@ -2409,7 +2416,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 cache_dir=self.test_dir,
                 keep_last=15,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_cleanup.assert_called_once_with(self.test_dir, keep_last=15)
 
     def test_main_callable_entry_point(self) -> None:
@@ -2549,7 +2556,7 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_run.assert_called_once()
         js_script = mock_run.call_args[0][0][4]
         self.assertIn('wallpaperList = ["file:///home/user/wall1.jpg", "file:///home/user/wall2.jpg"]', js_script)
-        self.assertIn('desktop.writeConfig("Image", imgUri);', js_script)
+        self.assertIn('desktop.writeConfig("Image", imageUri);', js_script)
 
     @patch("subprocess.run")
     def test_set_xfce_background_multi_monitor(self, mock_run: MagicMock) -> None:
@@ -2630,9 +2637,9 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("wchanger.set_kde_background", return_value=True)
     def test_set_wallpaper_for_desktop_multi_monitor_message(self, mock_kde: MagicMock) -> None:
         """set_wallpaper_for_desktop should format multi-monitor message when sequence passed."""
-        success, msg = wchanger.set_wallpaper_for_desktop("kde", ["/wall1.jpg", "/wall2.jpg"])
+        success, error_message = wchanger.set_wallpaper_for_desktop("kde", ["/wall1.jpg", "/wall2.jpg"])
         self.assertTrue(success)
-        self.assertIn("across 2 monitors", msg)
+        self.assertIn("across 2 monitors", error_message)
         mock_kde.assert_called_once_with(["/wall1.jpg", "/wall2.jpg"])
 
     @patch("wchanger.get_effective_monitor_count", return_value=2)
@@ -2645,7 +2652,7 @@ class TestWallpaperChanger(unittest.TestCase):
         wall1.write_bytes(b"data1")
         wall2.write_bytes(b"data2")
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_wallpaper_cycle(
                 desktop_environment="kde",
                 wallpapers=[str(wall1), str(wall2)],
@@ -2654,7 +2661,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 output_mode="console",
                 multi_monitor=True,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         mock_set.assert_called_once_with(
             desktop_environment="kde",
             wallpaper_path=[str(wall1), str(wall2)],
@@ -2675,7 +2682,7 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_count: MagicMock,
     ) -> None:
         """run_online_wallpaper_cycle with multi_monitor=True should download for each monitor."""
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.run_online_wallpaper_cycle(
                 desktop_environment="gnome",
                 provider="picsum",
@@ -2685,7 +2692,7 @@ class TestWallpaperChanger(unittest.TestCase):
                 cache_dir=self.test_dir,
                 multi_monitor=True,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         self.assertEqual(mock_download.call_count, 2)
         mock_set.assert_called_once()
         self.assertEqual(len(mock_set.call_args.kwargs["wallpaper_path"]), 2)
@@ -2700,13 +2707,13 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_prompt.return_value = 60
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as exception_context:
             wchanger.setup_install_autostart_service(
                 desktop_override="kde",
                 online_provider="wallhaven",
                 multi_monitor=True,
             )
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(exception_context.exception.code, 0)
         tee_call = mock_run.call_args_list[0]
         written_service_content = tee_call.kwargs["input"].decode("utf-8")
         self.assertIn("--multi-monitor", written_service_content)
@@ -2803,19 +2810,19 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_set_kde_background_relative_path(self, mock_run: MagicMock, mock_qdbus: MagicMock) -> None:
         """set_kde_background should convert relative paths to file:// URIs."""
         mock_run.return_value = MagicMock(returncode=0)
-        img = self.test_dir / "rel.png"
-        Image.new("RGB", (10, 10)).save(img)
+        test_image = self.test_dir / "rel.png"
+        Image.new("RGB", (10, 10)).save(test_image)
 
         # Single relative path
-        wchanger.set_kde_background(str(img))
+        wchanger.set_kde_background(str(test_image))
         js_single = mock_run.call_args[0][0][4]
-        self.assertIn(Path(img).resolve().as_uri(), js_single)
+        self.assertIn(Path(test_image).resolve().as_uri(), js_single)
 
         # Multi relative paths
         mock_run.reset_mock()
-        wchanger.set_kde_background([str(img), str(img)])
+        wchanger.set_kde_background([str(test_image), str(test_image)])
         js_multi = mock_run.call_args[0][0][4]
-        self.assertIn(Path(img).resolve().as_uri(), js_multi)
+        self.assertIn(Path(test_image).resolve().as_uri(), js_multi)
 
     @patch("subprocess.run")
     def test_set_xfce_background_fallback_all_fail(self, mock_run: MagicMock) -> None:
@@ -2854,22 +2861,522 @@ class TestWallpaperChanger(unittest.TestCase):
 
     def test_set_lxqt_multimonitor_config_supports_desktop_alias(self) -> None:
         """set_lxqt_multimonitor_config should update existing [Desktop] section for screen 0."""
-        cfg_file = self.test_dir / "settings.conf"
-        cfg_file.write_text("[Desktop]\nWallpaper=/old_primary.png\n\n[General]\nVersion=1\n")
+        configuration_file = self.test_dir / "settings.conf"
+        configuration_file.write_text("[Desktop]\nWallpaper=/old_primary.png\n\n[General]\nVersion=1\n")
 
         with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.test_dir)}):
             # create nested directory expected by function
-            lxqt_dir = self.test_dir / "pcmanfm-qt" / "lxqt"
-            lxqt_dir.mkdir(parents=True, exist_ok=True)
-            target_cfg = lxqt_dir / "settings.conf"
-            target_cfg.write_text("[Desktop]\nWallpaper=/old_primary.png\n\n[General]\nVersion=1\n")
+            lxqt_config_dir = self.test_dir / "pcmanfm-qt" / "lxqt"
+            lxqt_config_dir.mkdir(parents=True, exist_ok=True)
+            target_config_file = lxqt_config_dir / "settings.conf"
+            target_config_file.write_text("[Desktop]\nWallpaper=/old_primary.png\n\n[General]\nVersion=1\n")
 
             success = wchanger.set_lxqt_multimonitor_config(["/new0.png", "/new1.png"])
             self.assertTrue(success)
-            content = target_cfg.read_text()
+            content = target_config_file.read_text()
             self.assertIn("Wallpaper=/new0.png", content)
             self.assertIn("[Desktop_Screen_1]", content)
             self.assertIn("Wallpaper=/new1.png", content)
+
+    @patch("shutil.which", return_value=None)
+    def test_get_wayland_monitors_not_installed(self, mock_which: MagicMock) -> None:
+        """get_wayland_monitors should return empty list when no tool is installed."""
+        self.assertEqual(wchanger.get_wayland_monitors(), [])
+
+    @patch("shutil.which", return_value="/usr/bin/wlr-randr")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_success_position_before_modes(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should parse wlr-randr when position precedes mode list."""
+        sample_wlr_output = (
+            "DP-1 \"DisplayPort-1\"\n"
+            "  Position: 1920, 0\n"
+            "  Modes:\n"
+            "    1920x1080 px, 60.000000 Hz (current)\n"
+            "HDMI-A-1 \"HDMI-1\"\n"
+            "  Position: 0, 0\n"
+            "  Modes:\n"
+            "    2560x1440 px, 144.000000 Hz (current)\n"
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample_wlr_output)
+        detected_monitors = wchanger.get_wayland_monitors()
+        self.assertEqual(len(detected_monitors), 2)
+        self.assertEqual(detected_monitors[0]["x"], 0)
+        self.assertEqual(detected_monitors[0]["width"], 2560)
+        self.assertEqual(detected_monitors[0]["height"], 1440)
+        self.assertEqual(detected_monitors[1]["x"], 1920)
+        self.assertEqual(detected_monitors[1]["width"], 1920)
+
+    @patch("shutil.which", return_value="/usr/bin/wlr-randr")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_success_position_after_modes_and_filters_disabled(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should parse real wlr-randr output and filter disabled heads."""
+        sample_wlr_output = (
+            "DP-1 \"DisplayPort-1\"\n"
+            "  Enabled: yes\n"
+            "  Modes:\n"
+            "    1920x1080 px, 60.000000 Hz (current)\n"
+            "  Position: 1920, 0\n"
+            "HDMI-A-1 \"HDMI-1\"\n"
+            "  Enabled: yes\n"
+            "  Modes:\n"
+            "    2560x1440 px, 144.000000 Hz (current)\n"
+            "  Position: 0, 0\n"
+            "DP-2 \"DisplayPort-2\"\n"
+            "  Enabled: no\n"
+            "  Modes:\n"
+            "    1920x1080 px, 60.000000 Hz (current)\n"
+            "  Position: 3840, 0\n"
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample_wlr_output)
+        detected_monitors = wchanger.get_wayland_monitors()
+        self.assertEqual(len(detected_monitors), 2)
+        self.assertEqual(detected_monitors[0]["x"], 0)
+        self.assertEqual(detected_monitors[0]["width"], 2560)
+        self.assertEqual(detected_monitors[0]["height"], 1440)
+        self.assertEqual(detected_monitors[1]["x"], 1920)
+        self.assertEqual(detected_monitors[1]["width"], 1920)
+
+    @patch("shutil.which", return_value="/usr/bin/wlr-randr")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_json_format(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should parse wlr-randr --json output."""
+        sample_json = json.dumps(
+            {
+                "heads": [
+                    {
+                        "name": "DP-1",
+                        "enabled": True,
+                        "x": 1920,
+                        "y": 0,
+                        "mode": {"width": 1920, "height": 1080},
+                    },
+                    {
+                        "name": "HDMI-A-1",
+                        "enabled": True,
+                        "x": 0,
+                        "y": 0,
+                        "mode": {"width": 2560, "height": 1440},
+                    },
+                    {
+                        "name": "VGA-1",
+                        "enabled": False,
+                        "x": 0,
+                        "y": 0,
+                        "mode": {"width": 1024, "height": 768},
+                    },
+                ]
+            }
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample_json)
+        detected_monitors = wchanger.get_wayland_monitors()
+        self.assertEqual(len(detected_monitors), 2)
+        self.assertEqual(detected_monitors[0]["x"], 0)
+        self.assertEqual(detected_monitors[0]["width"], 2560)
+        self.assertEqual(detected_monitors[1]["x"], 1920)
+
+    @patch("shutil.which")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_swaymsg_fallback(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should fall back to swaymsg on Sway compositor."""
+        def which_side_effect(command_candidate: str) -> str | None:
+            if command_candidate == "swaymsg":
+                return "/usr/bin/swaymsg"
+            return None
+
+        mock_which.side_effect = which_side_effect
+        sample_sway_json = json.dumps(
+            [
+                {
+                    "name": "DP-1",
+                    "active": True,
+                    "rect": {"x": 1920, "y": 0, "width": 1920, "height": 1080},
+                },
+                {
+                    "name": "HDMI-1",
+                    "active": True,
+                    "rect": {"x": 0, "y": 0, "width": 2560, "height": 1440},
+                },
+                {
+                    "name": "DP-2",
+                    "active": False,
+                    "rect": {"x": 3840, "y": 0, "width": 1920, "height": 1080},
+                },
+            ]
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample_sway_json)
+        detected_monitors = wchanger.get_wayland_monitors()
+        self.assertEqual(len(detected_monitors), 2)
+        self.assertEqual(detected_monitors[0]["x"], 0)
+        self.assertEqual(detected_monitors[0]["width"], 2560)
+        self.assertEqual(detected_monitors[1]["x"], 1920)
+
+    @patch("shutil.which")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_hyprctl_fallback(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should fall back to hyprctl on Hyprland compositor."""
+        def which_side_effect(command_candidate: str) -> str | None:
+            if command_candidate == "hyprctl":
+                return "/usr/bin/hyprctl"
+            return None
+
+        mock_which.side_effect = which_side_effect
+        sample_hypr_json = json.dumps(
+            [
+                {
+                    "name": "DP-1",
+                    "disabled": False,
+                    "x": 1920,
+                    "y": 0,
+                    "width": 1920,
+                    "height": 1080,
+                },
+                {
+                    "name": "HDMI-1",
+                    "disabled": False,
+                    "x": 0,
+                    "y": 0,
+                    "width": 2560,
+                    "height": 1440,
+                },
+                {
+                    "name": "DP-2",
+                    "disabled": True,
+                    "x": 3840,
+                    "y": 0,
+                    "width": 1920,
+                    "height": 1080,
+                },
+            ]
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample_hypr_json)
+        detected_monitors = wchanger.get_wayland_monitors()
+        self.assertEqual(len(detected_monitors), 2)
+        self.assertEqual(detected_monitors[0]["x"], 0)
+        self.assertEqual(detected_monitors[0]["width"], 2560)
+        self.assertEqual(detected_monitors[1]["x"], 1920)
+
+    @patch("shutil.which", return_value="/usr/bin/wlr-randr")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_process_error(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should return empty list on process failure."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        self.assertEqual(wchanger.get_wayland_monitors(), [])
+
+    @patch("shutil.which", return_value="/usr/bin/xrandr")
+    @patch("subprocess.run")
+    def test_get_xrandr_monitors_fallback_to_standard_output(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_xrandr_monitors should parse standard xrandr output when --listmonitors returns nothing."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="Monitors: 0\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "Screen 0: minimum 320 x 200, current 3840 x 1080, maximum 16384 x 16384\n"
+                    "eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 194mm\n"
+                    "HDMI-1 connected 1920x1080+1920+0 (normal left inverted right x axis y axis) 597mm x 336mm\n"
+                    "DP-1 disconnected (normal left inverted right x axis y axis)\n"
+                ),
+            ),
+        ]
+        monitors = wchanger.get_xrandr_monitors()
+        self.assertEqual(len(monitors), 2)
+        self.assertEqual(monitors[0]["x"], 0)
+        self.assertEqual(monitors[0]["width"], 1920)
+        self.assertEqual(monitors[1]["x"], 1920)
+
+    @patch("wchanger.get_xfce_monitor_properties", return_value={})
+    @patch("wchanger.get_kde_desktop_count", return_value=0)
+    @patch("wchanger.get_xrandr_monitors", return_value=[])
+    @patch(
+        "wchanger.get_wayland_monitors",
+        return_value=[
+            {"width": 1920, "height": 1080, "x": 0, "y": 0},
+            {"width": 1920, "height": 1080, "x": 1920, "y": 0},
+        ],
+    )
+    def test_detect_connected_monitors_uses_wayland(
+        self,
+        mock_wayland: MagicMock,
+        mock_xrandr: MagicMock,
+        mock_kde: MagicMock,
+        mock_xfce: MagicMock,
+    ) -> None:
+        """detect_connected_monitors should utilize get_wayland_monitors when on Wayland."""
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}):
+            self.assertEqual(wchanger.detect_connected_monitors(), 2)
+
+    @patch("wchanger.get_xrandr_monitors")
+    def test_create_spanned_wallpaper_more_wallpapers_than_monitors(
+        self, mock_monitors: MagicMock
+    ) -> None:
+        """create_spanned_wallpaper should preserve monitor layout even if more wallpapers than monitors."""
+        mock_monitors.return_value = [
+            {"width": 1920, "height": 1080, "x": 0, "y": 0},
+            {"width": 1920, "height": 1080, "x": 1920, "y": 0},
+        ]
+        first_wallpaper = self.test_dir / "first.png"
+        second_wallpaper = self.test_dir / "second.png"
+        third_wallpaper = self.test_dir / "third.png"
+        Image.new("RGB", (800, 600), color="red").save(first_wallpaper)
+        Image.new("RGB", (800, 600), color="green").save(second_wallpaper)
+        Image.new("RGB", (800, 600), color="blue").save(third_wallpaper)
+
+        output_wallpaper = self.test_dir / "spanned_three.png"
+        result_path = wchanger.create_spanned_wallpaper(
+            [first_wallpaper, second_wallpaper, third_wallpaper], output_path=output_wallpaper
+        )
+        self.assertEqual(result_path, output_wallpaper)
+        with Image.open(output_wallpaper) as combined_image:
+            self.assertEqual(combined_image.size, (3840, 1080))
+
+    def test_set_lxqt_multimonitor_config_empty_file_adds_desktop_section(self) -> None:
+        """set_lxqt_multimonitor_config should write [Desktop] and [Desktop_Screen_0] when config is empty."""
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.test_dir)}):
+            lxqt_config_dir = self.test_dir / "pcmanfm-qt" / "lxqt"
+            lxqt_config_dir.mkdir(parents=True, exist_ok=True)
+            target_config_file = lxqt_config_dir / "settings.conf"
+
+            operation_success = wchanger.set_lxqt_multimonitor_config(["/new0.png", "/new1.png"])
+            self.assertTrue(operation_success)
+            config_content = target_config_file.read_text()
+            self.assertIn("[Desktop]", config_content)
+            self.assertIn("Wallpaper=/new0.png", config_content)
+            self.assertIn("[Desktop_Screen_1]", config_content)
+            self.assertIn("Wallpaper=/new1.png", config_content)
+
+    @patch("subprocess.run")
+    def test_set_gnome_background_older_version_without_dark_key(
+        self, mock_run: MagicMock
+    ) -> None:
+        """set_gnome_background should succeed on GNOME < 42 when picture-uri-dark key fails."""
+        def run_side_effect(command_args: list[str], **kwargs) -> MagicMock:
+            if "picture-uri-dark" in command_args:
+                return MagicMock(returncode=1, stderr="No such key 'picture-uri-dark'")
+            return MagicMock(returncode=0, stdout="")
+
+        mock_run.side_effect = run_side_effect
+        wallpaper_target_uri = "file:///home/user/background.jpg"
+        operation_success = wchanger.set_gnome_background(wallpaper_target_uri, theme=None)
+        self.assertTrue(operation_success)
+
+    @patch("wchanger.urlopen")
+    @patch("time.sleep")
+    def test_fetch_url_with_retry_does_not_retry_http_404(
+        self, mock_sleep: MagicMock, mock_urlopen: MagicMock
+    ) -> None:
+        """_fetch_url_with_retry should immediately raise HTTPError for 404 without retries or sleep."""
+        mock_urlopen.side_effect = HTTPError("https://example.com/notfound", 404, "Not Found", {}, None)
+        dummy_request = Request("https://example.com/notfound")
+        with self.assertRaises(HTTPError):
+            wchanger._fetch_url_with_retry(
+                dummy_request, timeout=10, max_retries=3, retry_delay_seconds=0.01
+            )
+        self.assertEqual(mock_urlopen.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    @patch("wchanger.urlopen")
+    @patch("time.sleep")
+    def test_fetch_url_with_retry_recovers_after_http_503(
+        self, mock_sleep: MagicMock, mock_urlopen: MagicMock
+    ) -> None:
+        """_fetch_url_with_retry should retry and succeed when server returns HTTP 503 Service Unavailable."""
+        successful_response = MagicMock()
+        successful_response.read.return_value = b"healthy_response"
+        successful_response.__enter__.return_value = successful_response
+        mock_urlopen.side_effect = [
+            HTTPError("https://example.com", 503, "Service Unavailable", {}, None),
+            successful_response,
+        ]
+
+        dummy_request = Request("https://example.com")
+        downloaded_bytes = wchanger._fetch_url_with_retry(
+            dummy_request, timeout=10, max_retries=3, retry_delay_seconds=0.01
+        )
+        self.assertEqual(downloaded_bytes, b"healthy_response")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("wchanger.urlopen")
+    @patch("time.sleep")
+    def test_fetch_url_with_retry_recovers_after_transient_error(
+        self, mock_sleep: MagicMock, mock_urlopen: MagicMock
+    ) -> None:
+        """_fetch_url_with_retry should retry and recover on transient URLError."""
+        successful_response = MagicMock()
+        successful_response.read.return_value = b"success_bytes"
+        successful_response.__enter__.return_value = successful_response
+        mock_urlopen.side_effect = [
+            URLError("Temporary network blip"),
+            successful_response,
+        ]
+
+        dummy_request = Request("https://example.com")
+        downloaded_bytes = wchanger._fetch_url_with_retry(
+            dummy_request, timeout=10, max_retries=3, retry_delay_seconds=0.01
+        )
+        self.assertEqual(downloaded_bytes, b"success_bytes")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("wchanger.urlopen")
+    @patch("time.sleep")
+    def test_fetch_url_with_retry_raises_when_exhausted(
+        self, mock_sleep: MagicMock, mock_urlopen: MagicMock
+    ) -> None:
+        """_fetch_url_with_retry should re-raise the error once all retry attempts are exhausted."""
+        mock_urlopen.side_effect = URLError("Persistent network outage")
+        dummy_request = Request("https://example.com")
+        with self.assertRaises(URLError):
+            wchanger._fetch_url_with_retry(
+                dummy_request, timeout=10, max_retries=2, retry_delay_seconds=0.01
+            )
+        self.assertEqual(mock_urlopen.call_count, 2)
+
+    @patch("shutil.which", return_value="/usr/bin/systemctl")
+    @patch("click.prompt")
+    @patch("subprocess.run")
+    def test_setup_install_autostart_includes_wayland_session_type(
+        self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """setup_install_autostart_service should forward XDG_SESSION_TYPE to systemd service."""
+        mock_prompt.return_value = 60
+        mock_run.return_value = MagicMock(returncode=0)
+
+        with patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland"}):
+            with self.assertRaises(SystemExit) as exception_context:
+                wchanger.setup_install_autostart_service(
+                    desktop_override="gnome",
+                    online_provider="wallhaven",
+                )
+            self.assertEqual(exception_context.exception.code, 0)
+
+        tee_invocation = mock_run.call_args_list[0]
+        service_text = tee_invocation.kwargs["input"].decode("utf-8")
+        self.assertIn("Environment=XDG_SESSION_TYPE=wayland", service_text)
+
+    @patch("shutil.which", return_value="/usr/bin/systemctl")
+    @patch("click.prompt")
+    @patch("subprocess.run")
+    def test_setup_install_autostart_includes_desktop_and_session(
+        self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """setup_install_autostart_service should forward desktop environment variables to systemd."""
+        mock_prompt.return_value = 60
+        mock_run.return_value = MagicMock(returncode=0)
+
+        session_environment = {
+            "XDG_CURRENT_DESKTOP": "GNOME",
+            "DESKTOP_SESSION": "gnome",
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+        }
+        with patch.dict(os.environ, session_environment):
+            with self.assertRaises(SystemExit) as exception_context:
+                wchanger.setup_install_autostart_service(
+                    desktop_override="gnome",
+                    online_provider="wallhaven",
+                )
+            self.assertEqual(exception_context.exception.code, 0)
+
+        tee_invocation = mock_run.call_args_list[0]
+        service_text = tee_invocation.kwargs["input"].decode("utf-8")
+        self.assertIn("Environment=XDG_CURRENT_DESKTOP=GNOME", service_text)
+        self.assertIn("Environment=DESKTOP_SESSION=gnome", service_text)
+        self.assertIn("Environment=PATH=/usr/local/bin:/usr/bin:/bin", service_text)
+
+    @patch("shutil.which", return_value="/usr/bin/xrandr")
+    @patch("subprocess.run")
+    def test_get_xrandr_monitors_negative_offsets(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_xrandr_monitors should parse negative coordinate offsets correctly."""
+        sample_xrandr_output = (
+            "Monitors: 2\n"
+            " 0: +*DP-1 2560/597x1440/336+0+0 DP-1\n"
+            " 1: +DP-2 1920/527x1080/296-1920+0 DP-2\n"
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample_xrandr_output)
+
+        monitors = wchanger.get_xrandr_monitors()
+        self.assertEqual(len(monitors), 2)
+        self.assertEqual(monitors[0]["x"], -1920)
+        self.assertEqual(monitors[0]["y"], 0)
+        self.assertEqual(monitors[0]["width"], 1920)
+        self.assertEqual(monitors[0]["height"], 1080)
+        self.assertEqual(monitors[1]["x"], 0)
+        self.assertEqual(monitors[1]["y"], 0)
+        self.assertEqual(monitors[1]["width"], 2560)
+        self.assertEqual(monitors[1]["height"], 1440)
+
+    @patch("shutil.which")
+    @patch("subprocess.run")
+    def test_get_wayland_monitors_negative_offsets(
+        self, mock_run: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """get_wayland_monitors should parse negative coordinate offsets in wlr-randr."""
+        def fake_which(command_name: str) -> str | None:
+            if command_name == "wlr-randr":
+                return "/usr/bin/wlr-randr"
+            return None
+
+        mock_which.side_effect = fake_which
+        sample_wlr_text = (
+            "DP-1 \"Brand Display\" (enabled)\n"
+            "  Position: -1920, 0\n"
+            "  1920x1080 px, 60.00 Hz (current)\n"
+            "DP-2 \"Brand Display\" (enabled)\n"
+            "  Position: 0, 0\n"
+            "  2560x1440 px, 144.00 Hz (current)\n"
+        )
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout=""),
+            MagicMock(returncode=0, stdout=sample_wlr_text),
+        ]
+
+        monitors = wchanger.get_wayland_monitors()
+        self.assertEqual(len(monitors), 2)
+        self.assertEqual(monitors[0]["x"], -1920)
+        self.assertEqual(monitors[0]["width"], 1920)
+        self.assertEqual(monitors[1]["x"], 0)
+        self.assertEqual(monitors[1]["width"], 2560)
+
+    @patch("wchanger.get_xrandr_monitors")
+    def test_create_spanned_wallpaper_negative_offsets(
+        self, mock_get_monitors: MagicMock
+    ) -> None:
+        """create_spanned_wallpaper should calculate correct bounding box with negative monitor coordinates."""
+        mock_get_monitors.return_value = [
+            {"width": 1920, "height": 1080, "x": -1920, "y": 0},
+            {"width": 1920, "height": 1080, "x": 0, "y": 0},
+        ]
+        first_wallpaper_path = self.test_dir / "wallpaper_left.png"
+        second_wallpaper_path = self.test_dir / "wallpaper_right.png"
+        Image.new("RGB", (200, 200), color="blue").save(first_wallpaper_path)
+        Image.new("RGB", (200, 200), color="green").save(second_wallpaper_path)
+
+        output_wallpaper_path = self.test_dir / "spanned_output.png"
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": ""}, clear=False):
+            generated_path = wchanger.create_spanned_wallpaper(
+                [first_wallpaper_path, second_wallpaper_path],
+                output_path=output_wallpaper_path,
+            )
+
+        self.assertTrue(generated_path.exists())
+        with Image.open(generated_path) as resulting_image:
+            self.assertEqual(resulting_image.size, (3840, 1080))
 
 
 if __name__ == "__main__":

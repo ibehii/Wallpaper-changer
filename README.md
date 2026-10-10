@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20(6%20Desktops)-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=open-source-initiative&logoColor=white)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-194%20Passing-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-215%20Passing-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
 [![Architecture](https://img.shields.io/badge/Architecture-Wayland%20%7C%20X11-blueviolet?style=for-the-badge&logo=gnome&logoColor=white)](#desktop-environments-matrix)
 
 <br/>
