@@ -1,4 +1,4 @@
-"""Anahita Wallpaper Changer (wchanger).
+""" Anahita Wallpaper Changer (wchanger).
 
 A lightweight Linux CLI script that cycles through desktop wallpapers on
 GNOME, Cinnamon, KDE Plasma, XFCE, MATE, and LXQt desktop environments.
@@ -259,7 +259,7 @@ BANNER = (
 ╚██████╗██║  ██║██║  ██║██║ ╚████║╚██████╔╝███████╗██║  ██║
  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝"""
     + MAGENTA
-    + "\n- Telegram: t.me/BZHNAM\n"
+    + "\n- Telegram: t.me/dr_xz\n"
     + "- GitHub: https://github.com/ibehii\n\n"
     + YELLOW
     + f"------------ # v{VERSION} # ------------  \n"
