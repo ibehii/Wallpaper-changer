@@ -38,32 +38,39 @@
 
 <table>
   <tr>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-quick-start">
         <font size="6">🚀</font><br/>
         <b>Quick Start</b><br/>
         <sub>Get started in 30 seconds</sub>
       </a>
     </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-key-features">
         <font size="6">✨</font><br/>
         <b>Key Features</b><br/>
         <sub>Everything wchanger can do</sub>
       </a>
     </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-desktop-environments-matrix">
         <font size="6">🖥️</font><br/>
         <b>Desktop Support</b><br/>
         <sub>GNOME, KDE, XFCE & more</sub>
       </a>
     </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-multi-monitor-support">
         <font size="6">🖥️🖥️</font><br/>
         <b>Multi-Monitor</b><br/>
         <sub>Different image per screen</sub>
+      </a>
+    </td>
+    <td align="center" width="20%">
+      <a href="#-start-at-login-systemd">
+        <font size="6">⏰</font><br/>
+        <b>Start at Login</b><br/>
+        <sub>Systemd startup service</sub>
       </a>
     </td>
   </tr>
