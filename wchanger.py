@@ -1,4 +1,4 @@
-"""Awesome Wallpaper Changer (wchanger).
+"""Anahita Wallpaper Changer (wchanger).
 
 A lightweight Linux CLI script that cycles through desktop wallpapers on
 GNOME, Cinnamon, KDE Plasma, XFCE, MATE, and LXQt desktop environments.
@@ -331,7 +331,7 @@ def verify_system_requirements(target_desktop: str) -> None:
     """Ensure Linux OS and required desktop CLI tools are available before attempting changes."""
     if platform.system() != "Linux":
         click.secho(
-            "Error: Awesome Wallpaper Changer only runs on Linux.",
+            "Error: Anahita Wallpaper Changer only runs on Linux.",
             fg="red",
             bold=True,
             err=True,
@@ -1910,7 +1910,7 @@ def setup_install_autostart_service(
     extra_environment_block = ("\n" + "\n".join(extra_environment_lines)) if extra_environment_lines else ""
 
     service_definition = f"""[Unit]
-Description=Awesome Wallpaper Changer Service
+Description=Anahita Wallpaper Changer Service
 After=graphical.target
 
 [Service]
@@ -2146,7 +2146,7 @@ def cli(
     photo_path: Path | None,
     multi_monitor: bool = False,
 ) -> None:
-    """Awesome Wallpaper Changer (wchanger).
+    """Anahita Wallpaper Changer (wchanger).
 
     Automatically cycle desktop wallpapers on GNOME, Cinnamon, KDE Plasma, XFCE, MATE, and LXQt.
     Desktop environment is auto-detected by default. Use --gnome, --cinnamon, --kde, --xfce, --mate, or --lxqt
@@ -2303,7 +2303,7 @@ def cli(
 
             if child_pid > 0:
                 click.secho(
-                    f"[+] Awesome Wallpaper Changer started in background (PID: {child_pid}).\n"
+                    f"[+] Anahita Wallpaper Changer started in background (PID: {child_pid}).\n"
                     f"[+] Mode: {desktop_display_name} | Pause: {pause}s | Source: online ({online_provider})\n"
                     f"[+] To stop it later, run: kill {child_pid} (or: pkill -f wchanger.py)",
                     fg="green",
@@ -2439,7 +2439,7 @@ def cli(
                 f" | Flags: {', '.join(active_feature_flags)}" if active_feature_flags else ""
             )
             click.secho(
-                f"[+] Awesome Wallpaper Changer started in background (PID: {child_pid}).\n"
+                f"[+] Anahita Wallpaper Changer started in background (PID: {child_pid}).\n"
                 f"[+] Mode: {desktop_display_name} | Pause: {pause}s | Directory: {selected_folder}{flags_summary_text}\n"
                 f"[+] To stop it later, run: kill {child_pid} (or: pkill -f wchanger.py)",
                 fg="green",

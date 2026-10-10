@@ -1,6 +1,10 @@
 <div align="center">
 
-# 🖼️ Awesome Wallpaper Changer (`wchanger`)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ibehii/Wallpaper-changer/main/photos/wallpaer1.png" width="85%" alt="Anahita Wallpaper Changer Hero Banner" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);" />
+</p>
+
+# 🌊 Anahita Wallpaper Changer (`wchanger`)
 ### *The Ultimate Autonomous Wallpaper Rotator & Multi-Monitor Engine for Linux*
 
 [![Release](https://img.shields.io/badge/Release-v3.0.0--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
@@ -26,7 +30,7 @@
 
 > **Transform your Linux desktop experience.**
 > 
-> **Awesome Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **all major Linux Desktop Environments** (**GNOME**, **Cinnamon**, **KDE Plasma 5 & 6**, **XFCE**, **MATE**, and **LXQt**) with native integration, true **multi-monitor independent displays**, curated **online wallpaper providers**, persistent **TOML configuration**, and automated **systemd login service installation**.
+> **Anahita Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **all major Linux Desktop Environments** (**GNOME**, **Cinnamon**, **KDE Plasma 5 & 6**, **XFCE**, **MATE**, and **LXQt**) with native integration, true **multi-monitor independent displays**, curated **online wallpaper providers**, persistent **TOML configuration**, and automated **systemd login service installation**.
 
 ---
 
@@ -142,7 +146,7 @@ wchanger -m --online bing
 <a id="-desktop-environments-matrix"></a>
 ## 🖥️ Desktop Environments Matrix
 
-Awesome Wallpaper Changer natively interfaces with your desktop manager using system-native APIs:
+Anahita Wallpaper Changer natively interfaces with your desktop manager using system-native APIs:
 
 | Desktop Environment | Supported Versions | Backend Setter | Multi-Monitor Method | Theme Awareness | Required Tool |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -328,7 +332,7 @@ Save your preferences in `config.toml` (next to the executable or in `~/.config/
 
 ```toml
 # =====================================================================
-# Awesome Wallpaper Changer (wchanger) - Configuration File
+# Anahita Wallpaper Changer (wchanger) - Configuration File
 # =====================================================================
 
 # Folder containing local wallpapers (used when source = "folder")

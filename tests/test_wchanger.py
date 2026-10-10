@@ -1824,7 +1824,7 @@ class TestWallpaperChanger(unittest.TestCase):
             ["--online", "picsum", "--kde", "-b", "-p", "30"],
         )
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Awesome Wallpaper Changer started in background (PID: 54321)", result.output)
+        self.assertIn("Anahita Wallpaper Changer started in background (PID: 54321)", result.output)
         self.assertIn("Source: online (picsum)", result.output)
 
     @patch("shutil.which", return_value="/usr/bin/systemctl")

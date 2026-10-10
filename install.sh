@@ -2,14 +2,14 @@
 set -e
 
 # ==============================================================================
-# Awesome Wallpaper Changer (wchanger) Installer
+# Anahita Wallpaper Changer (wchanger) Installer
 # Installs wchanger as a system command accessible in /bin or /usr/local/bin
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "[i] Installing Awesome Wallpaper Changer (wchanger)..."
+echo "[i] Installing Anahita Wallpaper Changer (wchanger)..."
 
 # 1. Install package using pip
 if command -v pip3 >/dev/null 2>&1; then
@@ -64,6 +64,6 @@ fi
 
 echo ""
 echo "=========================================================================="
-echo "[+] Awesome Wallpaper Changer is ready!"
+echo "[+] Anahita Wallpaper Changer is ready!"
 echo "[+] Run it anytime simply with: wchanger"
 echo "=========================================================================="

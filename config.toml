@@ -1,5 +1,5 @@
 # =====================================================================
-# Awesome Wallpaper Changer (wchanger) - Configuration File
+# Anahita Wallpaper Changer (wchanger) - Configuration File
 # =====================================================================
 # Place this file as 'config.toml' next to wchanger.py or in ~/.config/wchanger/config.toml.
 # Command-line flags always take precedence over options defined here.
