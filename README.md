@@ -1,13 +1,13 @@
 <div align="center">
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/728cdd93-b72f-4b21-9929-1d448c8d7f70" width="70%" alt="Anahita Wallpaper Changer Hero Banner" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); max-height: 420px; object-fit: contain;" />
+  <img src="photos/anahita_banner.png" width="640" alt="Anahita Wallpaper Changer Banner" />
 </p>
 
 # 🌊 Anahita Wallpaper Changer (`wchanger`)
 ### *The Ultimate Autonomous Wallpaper Rotator & Multi-Monitor Engine for Linux*
 
-[![Release](https://img.shields.io/badge/Release-v3.0.0--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
+[![Release](https://img.shields.io/badge/Release-v3.0.2--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20(6%20Desktops)-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=open-source-initiative&logoColor=white)](LICENSE)
@@ -17,9 +17,9 @@
 <br/>
 
 <p align="center">
-  <img src="photos/wallpaer1.png" width="31%" alt="Cosmic Landscape" style="border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" />
-  <img src="photos/wallpaer2.jpg" width="31%" alt="Serene River Forest" style="border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" />
-  <img src="photos/wallpaer3.jpg" width="31%" alt="Winter Mountain Pines" style="border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" />
+  <img src="photos/wallpaer1.png" width="31%" alt="Cosmic Landscape" />
+  <img src="photos/wallpaer2.jpg" width="31%" alt="Serene River Forest" />
+  <img src="photos/wallpaer3.jpg" width="31%" alt="Winter Mountain Pines" />
 </p>
 
 *Sample bundled high-definition wallpapers dynamically managed by `wchanger`.*
@@ -30,7 +30,7 @@
 
 > **Transform your Linux desktop experience.**
 > 
-> **Anahita Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **[...**
+> **Anahita Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **all major Linux Desktop Environments** (**GNOME**, **Cinnamon**, **KDE Plasma 5 & 6**, **XFCE**, **MATE**, and **LXQt**) with native integration, true **multi-monitor independent displays**, curated **online wallpaper providers**, persistent **TOML configuration**, and automated **systemd login service installation**.
 
 ---
 
@@ -68,28 +68,35 @@
     </td>
   </tr>
   <tr>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-installation">
         <font size="6">📦</font><br/>
         <b>Installation</b><br/>
         <sub>Install to /bin & system PATH</sub>
       </a>
     </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-online-wallpaper-sources">
         <font size="6">🌐</font><br/>
         <b>Online Sources</b><br/>
         <sub>Wallhaven, Bing, Picsum</sub>
       </a>
     </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
       <a href="#-configuration-file-configtoml">
         <font size="6">⚙️</font><br/>
         <b>Configuration</b><br/>
         <sub>Zero-typing config.toml</sub>
       </a>
     </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
+      <a href="#-cli-reference">
+        <font size="6">ℹ️</font><br/>
+        <b>Change Settings</b><br/>
+        <sub>Via config or CLI flags</sub>
+      </a>
+    </td>
+    <td align="center" width="20%">
       <a href="#-troubleshooting">
         <font size="6">🔍</font><br/>
         <b>Troubleshooting</b><br/>

@@ -61,7 +61,7 @@ except ImportError:
         tomllib = None  # type: ignore[assignment]
 
 
-VERSION = "3.0.0"
+VERSION = "3.0.2"
 DEFAULT_PAUSE_SECONDS = 60
 DEFAULT_KEEP_LAST = 20
 DEFAULT_CONFIG_FILENAME = "config.toml"
@@ -2363,6 +2363,7 @@ def cli(
             + f"{RESET}"
         )
         print(f"{CYAN}[i] Wallpaper source: online provider '{online_provider}'{RESET}")
+        print(f"{CYAN}[i] Tip: Customize settings in 'config.toml' or by passing command-line options (see README.md).{RESET}")
         if multi_monitor:
             effective_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
             print(f"{CYAN}[i] Multi-monitor: enabled ({effective_monitors} displays){RESET}")
@@ -2501,6 +2502,7 @@ def cli(
         print(f"{CYAN}[i] Shuffle: enabled{RESET}")
     if recursive:
         print(f"{CYAN}[i] Recursive scan: enabled{RESET}")
+    print(f"{CYAN}[i] Tip: Customize settings in 'config.toml' or by passing command-line options (see README.md).{RESET}")
     if multi_monitor:
         effective_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
         print(f"{CYAN}[i] Multi-monitor: enabled ({effective_monitors} displays){RESET}")
