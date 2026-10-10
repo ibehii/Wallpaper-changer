@@ -136,50 +136,6 @@ wchanger -m --online bing
 | **Shuffle & Subfolder Discovery** | Deep directory traversal (`-R`) and randomized non-repeating shuffle (`-s`). | 🔀 Fresh rotations |
 | **Light & Dark Theme Sync** | Independent or synchronized GNOME 42+ day/night background switching. | 🌗 Adaptive theme modes |
 
----
-
-<a id="-workflow-and-architecture"></a>
-## 📊 Workflow & Architecture
-
-The following diagram illustrates how `wchanger` evaluates input, detects system hardware, fetches wallpapers, and integrates with the active Linux desktop environment:
-
-```mermaid
-flowchart TD
-    A(["wchanger Invocation"]) --> B["Load config.toml"]
-    B --> C["CLI Options Override"]
-    
-    C --> D{"Desktop Mode?"}
-    D -- "Auto-Detect" --> E["Inspect XDG_CURRENT_DESKTOP & DESKTOP_SESSION"]
-    D -- "Manual Flag" --> F["Explicit: --gnome / --kde / --xfce / etc."]
-    E --> G["Resolved Desktop Environment"]
-    F --> G
-    
-    G --> H{"Wallpaper Source?"}
-    H -- "Local Folder" --> I["Scan & Validate Images (Recursive / Shuffle)"]
-    H -- "Online Provider" --> J["Query API: Wallhaven / Bing / Picsum / LoremFlickr"]
-    J --> K["Download & Prune Cache via --keep-last"]
-    
-    I --> L{"Multi-Monitor Enabled?"}
-    K --> L
-    
-    L -- "Single Display" --> M["Standard Desktop Setter"]
-    L -- "Multi-Monitor" --> N{"Environment Backend"}
-    
-    N -- "KDE Plasma" --> O["D-Bus PlasmaShell Scripting per Desktop Containment"]
-    N -- "XFCE" --> P["xfconf-query per Screen/Monitor/Workspace"]
-    N -- "GNOME / Cinnamon / MATE" --> Q["xrandr Geometry Query + Pillow Spanned Stitching"]
-    N -- "LXQt" --> R["pcmanfm-qt Multi-Screen Config / Spanned Canvas"]
-    
-    M --> S(["Wallpaper Applied to Session"])
-    O --> S
-    P --> S
-    Q --> S
-    R --> S
-    
-    S --> T{"Continuous Run?"}
-    T -- "Yes" --> U["Sleep Pause Interval"] --> H
-    T -- "No (Single Pass)" --> V(["Graceful Exit 0"])
-```
 
 ---
 
