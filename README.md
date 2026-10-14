@@ -265,6 +265,15 @@ pip install .
 sudo ln -sf $(which wchanger) /bin/wchanger
 ```
 
+### 🧩 GNOME Shell Extension (Optional)
+
+If you use GNOME Shell (45–51+), install the native top-panel extension with **Next**, **Previous**, **Favorites**, and **Online Providers**:
+
+```bash
+make install-extension
+gnome-extensions enable wchanger@ibehii.github.com
+```
+
 > [!TIP]
 > **User-only installation:** If you do not have root or `sudo` access, run `pip install --user .` and ensure `~/.local/bin` is in your shell `PATH` (`export PATH="$HOME/.local/bin:$PATH"`).
 

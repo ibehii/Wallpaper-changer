@@ -66,4 +66,16 @@ echo ""
 echo "=========================================================================="
 echo "[+] Anahita Wallpaper Changer is ready!"
 echo "[+] Run it anytime simply with: wchanger"
+
+# 4. Optional: Check for GNOME Shell and offer extension installation
+if command -v gnome-shell >/dev/null 2>&1; then
+    echo "--------------------------------------------------------------------------"
+    echo "[i] GNOME Shell detected on your system."
+    read -r -p "[?] Would you like to install the Anahita GNOME Shell Extension? [Y/n]: " INSTALL_EXT || true
+    INSTALL_EXT="${INSTALL_EXT:-Y}"
+    if [[ "$INSTALL_EXT" =~ ^[Yy]$ ]]; then
+        make install-extension
+    fi
+fi
+
 echo "=========================================================================="

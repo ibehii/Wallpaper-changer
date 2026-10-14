@@ -1,0 +1,17 @@
+{
+  "name": "Anahita Wallpaper Changer",
+  "description": "Seamless top-panel controls for Anahita Wallpaper Changer: Next, Previous, Favorite, online sources, multi-monitor, and background service management.",
+  "uuid": "wchanger@ibehii.github.com",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.wchanger",
+  "url": "https://github.com/ibehii/Wallpaper-changer",
+  "version": 1
+}

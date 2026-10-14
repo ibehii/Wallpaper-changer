@@ -2524,7 +2524,11 @@ class TestWallpaperChanger(unittest.TestCase):
         """get_effective_monitor_count with multi_monitor=True should return 3 if 3 detected."""
         self.assertEqual(wchanger.get_effective_monitor_count(multi_monitor=True), 3)
 
-    def test_create_spanned_wallpaper_stitches_images(self) -> None:
+    @patch("wchanger.get_wayland_monitors", return_value=[])
+    @patch("wchanger.get_xrandr_monitors", return_value=[])
+    def test_create_spanned_wallpaper_stitches_images(
+        self, mock_xrandr: MagicMock, mock_wayland: MagicMock
+    ) -> None:
         """create_spanned_wallpaper should horizontally stitch images into a single file."""
         img1 = self.test_dir / "left.png"
         img2 = self.test_dir / "right.png"

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gnome-shell-extension-wchanger">
+  <schema id="org.gnome.shell.extensions.wchanger" path="/org/gnome/shell/extensions/wchanger/">
+    <key name="show-indicator" type="b">
+      <default>true</default>
+      <summary>Show top bar panel icon</summary>
+      <description>Whether to show the Anahita Wallpaper Changer indicator in the top panel.</description>
+    </key>
+    <key name="favorites-directory" type="s">
+      <default>""</default>
+      <summary>Favorites directory path</summary>
+      <description>Directory path where favorited wallpapers are stored. Defaults to ~/Pictures/Wallpapers/Favorites if empty.</description>
+    </key>
+    <key name="default-provider" type="s">
+      <default>"wallhaven"</default>
+      <summary>Default online provider</summary>
+      <description>Provider used when fetching online wallpapers (wallhaven, bing, picsum, loremflickr).</description>
+    </key>
+    <key name="enable-multi-monitor" type="b">
+      <default>false</default>
+      <summary>Enable multi-monitor spanning by default</summary>
+      <description>Whether to invoke wchanger with -m for multi-monitor display spanning.</description>
+    </key>
+  </schema>
+</schemalist>
