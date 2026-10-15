@@ -270,8 +270,18 @@ sudo ln -sf $(which wchanger) /bin/wchanger
 If you use GNOME Shell (45–51+), install the native top-panel extension with **Next**, **Previous**, **Favorites**, and **Online Providers**:
 
 ```bash
+# 1. Install & compile schemas locally
 make install-extension
+
+# 2. Reload GNOME Shell:
+#    - Wayland: Log out and log back in
+#    - X11: Press Alt+F2, type 'r', and press Enter
+
+# 3. Enable the extension
 gnome-extensions enable wchanger@ibehii.github.com
+
+# 4. Open settings/preferences (optional)
+gnome-extensions prefs wchanger@ibehii.github.com
 ```
 
 > [!TIP]
