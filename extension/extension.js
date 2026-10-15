@@ -42,6 +42,42 @@ function runCommandAsync(argv, onFinished = null) {
 }
 
 /**
+ * Resolves the executable path/argv for wchanger across PATH, ~/.local/bin, /usr/local/bin, etc.
+ */
+function getWchangerCommand(customPath = '') {
+    if (customPath && customPath.trim().length > 0) {
+        return [customPath.trim()];
+    }
+
+    if (GLib.find_program_in_path('wchanger')) {
+        return ['wchanger'];
+    }
+
+    const home = GLib.get_home_dir();
+    const candidatePaths = [
+        `${home}/.local/bin/wchanger`,
+        '/usr/local/bin/wchanger',
+        '/usr/bin/wchanger',
+        '/bin/wchanger',
+    ];
+
+    for (const p of candidatePaths) {
+        if (GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE)) {
+            return [p];
+        }
+    }
+
+    // Fallback: check if dev repository script exists
+    const repoCandidate = `${home}/Dev/Wallpaper-changer/wchanger.py`;
+    if (GLib.file_test(repoCandidate, GLib.FileTest.EXISTS)) {
+        const pythonBin = GLib.find_program_in_path('python3') || 'python3';
+        return [pythonBin, repoCandidate];
+    }
+
+    return null;
+}
+
+/**
  * History & Favorite Store Manager
  * Persists history in ~/.cache/wchanger/history.json
  */
@@ -189,6 +225,29 @@ class WchangerIndicator extends PanelMenu.Button {
         this._buildMenu();
         this._syncCurrentBackground();
 
+        // Automatic Background Rotator timer state
+        this._rotatorTimerId = null;
+        this._initRotator();
+
+        // Listen for settings changes
+        this._intervalChangedId = this._settings.connect('changed::rotation-interval', () => {
+            if (this._settings.get_boolean('rotator-enabled')) {
+                this._startRotatorTimer();
+            }
+        });
+
+        this._rotatorEnabledChangedId = this._settings.connect('changed::rotator-enabled', () => {
+            const enabled = this._settings.get_boolean('rotator-enabled');
+            if (this._serviceSwitch && this._serviceSwitch.state !== enabled) {
+                this._serviceSwitch.setToggleState(enabled);
+            }
+            if (enabled) {
+                this._startRotatorTimer();
+            } else {
+                this._stopRotatorTimer();
+            }
+        });
+
         // Listen for external wallpaper changes to keep history in sync (both light and dark modes)
         this._bgChangedId = this._bgSettings.connect('changed::picture-uri', () => {
             this._syncCurrentBackground();
@@ -199,6 +258,18 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        if (this._rotatorTimerId) {
+            GLib.Source.remove(this._rotatorTimerId);
+            this._rotatorTimerId = null;
+        }
+        if (this._intervalChangedId) {
+            this._settings.disconnect(this._intervalChangedId);
+            this._intervalChangedId = null;
+        }
+        if (this._rotatorEnabledChangedId) {
+            this._settings.disconnect(this._rotatorEnabledChangedId);
+            this._rotatorEnabledChangedId = null;
+        }
         if (this._bgChangedId) {
             this._bgSettings.disconnect(this._bgChangedId);
             this._bgChangedId = null;
@@ -237,14 +308,7 @@ class WchangerIndicator extends PanelMenu.Button {
 
     _buildMenu() {
         // Section 1: Navigation Controls (Previous, Next, Favorite)
-        this._navBox = new St.BoxLayout({
-            style_class: 'wchanger-nav-box',
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-
-        // 1. Previous (Back)
-        this._prevItem = new PopupMenu.PopupMenuItem('⏮  Previous');
+        this._prevItem = new PopupMenu.PopupImageMenuItem(_('Previous'), 'media-skip-backward-symbolic');
         this._prevItem.connect('activate', () => {
             const prevWallpaper = this._historyManager.getPrevious();
             if (prevWallpaper) {
@@ -253,8 +317,7 @@ class WchangerIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(this._prevItem);
 
-        // 2. Next (Forward / Rotate)
-        this._nextItem = new PopupMenu.PopupMenuItem('⏭  Next Wallpaper');
+        this._nextItem = new PopupMenu.PopupImageMenuItem(_('Next Wallpaper'), 'media-skip-forward-symbolic');
         this._nextItem.connect('activate', () => {
             if (this._historyManager.canGoForward()) {
                 const nextWallpaper = this._historyManager.getNext();
@@ -265,8 +328,7 @@ class WchangerIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(this._nextItem);
 
-        // 3. Favorite Button
-        this._favItem = new PopupMenu.PopupMenuItem('⭐  Add to Favorites');
+        this._favItem = new PopupMenu.PopupImageMenuItem(_('Add to Favorites'), 'starred-symbolic');
         this._favItem.connect('activate', () => {
             this._favoriteCurrentWallpaper();
         });
@@ -275,56 +337,68 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Section 2: Online Sources Submenu
-        const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem('🌐  Online Providers');
+        const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Online Providers'), true);
+        if (sourcesSubMenu.icon) {
+            sourcesSubMenu.icon.icon_name = 'applications-internet-symbolic';
+        }
+
         const providers = [
-            { label: 'Bing Daily Photo', key: 'bing' },
-            { label: 'Wallhaven Toplist', key: 'wallhaven' },
-            { label: 'Lorem Picsum (Random)', key: 'picsum' },
-            { label: 'LoremFlickr (Nature)', key: 'loremflickr' },
+            { label: _('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
+            { label: _('Wallhaven Toplist'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
+            { label: _('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
+            { label: _('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
         ];
         providers.forEach(p => {
-            const item = new PopupMenu.PopupMenuItem(p.label);
+            const item = new PopupMenu.PopupImageMenuItem(p.label, p.icon);
             item.connect('activate', () => {
                 const multiMon = this._settings.get_boolean('enable-multi-monitor');
-                const argv = ['wchanger', '--online', p.key, '--no-repetition'];
-                if (multiMon) argv.push('-m');
-                this._runWchangerCommand(argv);
+                const args = ['--online', p.key, '--no-repetition'];
+                if (multiMon) args.push('-m');
+                this._runWchangerCommand(args);
             });
             sourcesSubMenu.menu.addMenuItem(item);
         });
         this.menu.addMenuItem(sourcesSubMenu);
 
         // Section 3: Multi-Monitor Quick Action
-        const multiMonItem = new PopupMenu.PopupMenuItem('🖥️  Rotate Multi-Monitor');
+        const multiMonItem = new PopupMenu.PopupImageMenuItem(_('Rotate Multi-Monitor'), 'video-display-symbolic');
         multiMonItem.connect('activate', () => {
-            this._runWchangerCommand(['wchanger', '-m', '--no-repetition']);
+            this._runWchangerCommand(['-m', '--no-repetition']);
         });
         this.menu.addMenuItem(multiMonItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Section 4: Systemd Background Service Switch
-        this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem('🔄  Background Rotator', false);
-        this._checkServiceState();
+        // Section 4: Automatic Background Rotator Switch
+        this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem(_('Background Rotator'), false);
+        const rotatorIcon = new St.Icon({
+            icon_name: 'view-refresh-symbolic',
+            style_class: 'popup-menu-icon',
+        });
+        this._serviceSwitch.insert_child_at_index(rotatorIcon, 0);
+
         this._serviceSwitch.connect('toggled', (item, state) => {
-            const action = state ? 'start' : 'stop';
-            runCommandAsync(['systemctl', '--user', action, 'wallpaper-changer.service'], (success) => {
-                if (!success) {
-                    this._checkServiceState();
-                }
-            });
+            this._settings.set_boolean('rotator-enabled', state);
+            if (state) {
+                this._startRotatorTimer();
+                this._triggerWchangerRotation();
+                this._controlSystemdService('start');
+            } else {
+                this._stopRotatorTimer();
+                this._controlSystemdService('stop');
+            }
         });
         this.menu.addMenuItem(this._serviceSwitch);
 
         // Section 5: Folder & Settings shortcuts
-        const openFavsItem = new PopupMenu.PopupMenuItem('📂  Open Favorites Folder');
+        const openFavsItem = new PopupMenu.PopupImageMenuItem(_('Open Favorites Folder'), 'folder-open-symbolic');
         openFavsItem.connect('activate', () => {
             const favDir = this._getFavoritesDirectory();
             runCommandAsync(['xdg-open', favDir]);
         });
         this.menu.addMenuItem(openFavsItem);
 
-        const prefsItem = new PopupMenu.PopupMenuItem('⚙️  Extension Settings...');
+        const prefsItem = new PopupMenu.PopupImageMenuItem(_('Extension Settings…'), 'preferences-system-symbolic');
         prefsItem.connect('activate', () => {
             this._extension.openPreferences();
         });
@@ -332,7 +406,7 @@ class WchangerIndicator extends PanelMenu.Button {
 
         this.menu.connect('open-state-changed', (menu, isOpen) => {
             if (isOpen) {
-                this._checkServiceState();
+                this._checkSystemdServiceState();
                 this._updateNavButtons();
             }
         });
@@ -344,19 +418,68 @@ class WchangerIndicator extends PanelMenu.Button {
         }
     }
 
-    _triggerWchangerRotation() {
-        const multiMon = this._settings.get_boolean('enable-multi-monitor');
-        const argv = ['wchanger', '--no-repetition'];
-        if (multiMon) {
-            argv.push('-m');
+    _initRotator() {
+        const enabled = this._settings.get_boolean('rotator-enabled');
+        this._serviceSwitch.setToggleState(enabled);
+        if (enabled) {
+            this._startRotatorTimer();
         }
-        this._runWchangerCommand(argv);
+        this._checkSystemdServiceState();
     }
 
-    _runWchangerCommand(argv) {
-        runCommandAsync(argv, (success) => {
+    _startRotatorTimer() {
+        this._stopRotatorTimer();
+        let intervalSec = this._settings.get_int('rotation-interval');
+        if (intervalSec < 30) {
+            intervalSec = 300;
+        }
+
+        this._rotatorTimerId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            intervalSec,
+            () => {
+                this._triggerWchangerRotation();
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
+    _stopRotatorTimer() {
+        if (this._rotatorTimerId) {
+            GLib.Source.remove(this._rotatorTimerId);
+            this._rotatorTimerId = null;
+        }
+    }
+
+    _triggerWchangerRotation() {
+        const multiMon = this._settings.get_boolean('enable-multi-monitor');
+        const args = ['--no-repetition'];
+        if (multiMon) {
+            args.push('-m');
+        }
+        this._runWchangerCommand(args);
+    }
+
+    _runWchangerCommand(args) {
+        const customPath = this._settings.get_string('custom-wchanger-path');
+        const baseCmd = getWchangerCommand(customPath);
+        if (!baseCmd) {
+            Main.notify(
+                'Anahita Wallpaper Changer',
+                _('“wchanger” command not found. Please install via “pip install .” or configure path in settings.')
+            );
+            return;
+        }
+
+        const fullArgv = [...baseCmd, ...args];
+        runCommandAsync(fullArgv, (success) => {
             if (success) {
                 this._syncCurrentBackground();
+            } else {
+                Main.notify(
+                    'Anahita Wallpaper Changer',
+                    _('Failed to rotate wallpaper. Please verify image path or online connection.')
+                );
             }
         });
     }
@@ -405,7 +528,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 try {
                     file.copy_finish(res);
                     Main.notify(
-                        '⭐ Anahita Wallpaper Changer',
+                        'Anahita Wallpaper Changer',
                         `${_('Saved to Favorites:')} ${baseName}`
                     );
                 } catch (e) {
@@ -416,9 +539,8 @@ class WchangerIndicator extends PanelMenu.Button {
         );
     }
 
-    _checkServiceState() {
+    _checkSystemdServiceState() {
         if (!GLib.find_program_in_path('systemctl')) {
-            this._serviceSwitch.setToggleState(false);
             return;
         }
 
@@ -439,18 +561,27 @@ class WchangerIndicator extends PanelMenu.Button {
                         const [units] = reply.deepUnpack();
                         if (units && units.length > 0) {
                             const activeState = units[0][3];
-                            this._serviceSwitch.setToggleState(activeState === 'active');
-                        } else {
-                            this._serviceSwitch.setToggleState(false);
+                            if (activeState === 'active') {
+                                this._serviceSwitch.setToggleState(true);
+                                this._settings.set_boolean('rotator-enabled', true);
+                            }
                         }
                     } catch (e) {
-                        this._serviceSwitch.setToggleState(false);
+                        // Ignore D-Bus lookup errors
                     }
                 }
             );
         } catch (e) {
-            this._serviceSwitch.setToggleState(false);
+            // Ignore
         }
+    }
+
+    _controlSystemdService(action) {
+        if (!GLib.find_program_in_path('systemctl')) {
+            return;
+        }
+        // Non-blocking attempt to control systemd service if present
+        runCommandAsync(['systemctl', '--user', action, 'wallpaper-changer.service']);
     }
 });
 

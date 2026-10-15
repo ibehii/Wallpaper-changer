@@ -86,5 +86,59 @@ export default class WchangerPreferences extends ExtensionPreferences {
             }
         });
         onlineGroup.add(providerRow);
+
+        // Group 4: Automatic Background Rotator
+        const rotatorGroup = new Adw.PreferencesGroup({
+            title: _('Background Rotator'),
+            description: _('Configure periodic automatic wallpaper changes.'),
+        });
+        page.add(rotatorGroup);
+
+        const rotatorEnabledRow = new Adw.SwitchRow({
+            title: _('Enable Background Rotator'),
+            subtitle: _('Rotate wallpapers automatically at the configured time interval.'),
+        });
+        settings.bind('rotator-enabled', rotatorEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        rotatorGroup.add(rotatorEnabledRow);
+
+        const currentIntervalSec = settings.get_int('rotation-interval') || 300;
+        const currentIntervalMin = Math.max(1, Math.round(currentIntervalSec / 60));
+        const intervalAdjustment = new Gtk.Adjustment({
+            lower: 1,
+            upper: 1440,
+            step_increment: 1,
+            page_increment: 5,
+            value: currentIntervalMin,
+        });
+
+        const intervalRow = new Adw.SpinRow({
+            title: _('Rotation Interval (minutes)'),
+            subtitle: _('Time in minutes between automatic rotations (default: 5 min).'),
+            adjustment: intervalAdjustment,
+        });
+        intervalRow.connect('notify::value', (widget) => {
+            const minutes = Math.max(1, Math.round(widget.get_value()));
+            settings.set_int('rotation-interval', minutes * 60);
+        });
+        rotatorGroup.add(intervalRow);
+
+        // Group 5: Advanced & Execution Paths
+        const advancedGroup = new Adw.PreferencesGroup({
+            title: _('Advanced'),
+            description: _('Executable resolution and custom CLI overrides.'),
+        });
+        page.add(advancedGroup);
+
+        const currentCustomPath = settings.get_string('custom-wchanger-path') || '';
+        const customPathRow = new Adw.EntryRow({
+            title: _('Custom wchanger Executable Path'),
+            text: currentCustomPath,
+            show_apply_button: true,
+        });
+        customPathRow.connect('apply', (entry) => {
+            const raw = entry.get_text().trim();
+            settings.set_string('custom-wchanger-path', raw);
+        });
+        advancedGroup.add(customPathRow);
     }
 }

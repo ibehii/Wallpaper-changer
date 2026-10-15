@@ -21,5 +21,20 @@
       <summary>Enable multi-monitor spanning by default</summary>
       <description>Whether to invoke wchanger with -m for multi-monitor display spanning.</description>
     </key>
+    <key name="rotator-enabled" type="b">
+      <default>false</default>
+      <summary>Enable background rotator timer</summary>
+      <description>Whether the extension should rotate wallpapers on an automatic background interval.</description>
+    </key>
+    <key name="rotation-interval" type="i">
+      <default>300</default>
+      <summary>Rotation interval in seconds</summary>
+      <description>Time interval in seconds between automatic background wallpaper rotations (default: 300s = 5m).</description>
+    </key>
+    <key name="custom-wchanger-path" type="s">
+      <default>""</default>
+      <summary>Custom wchanger executable path</summary>
+      <description>Optional custom absolute path to the wchanger executable.</description>
+    </key>
   </schema>
 </schemalist>
