@@ -7,6 +7,7 @@ GNOME, Cinnamon, KDE Plasma, XFCE, MATE, and LXQt desktop environments.
 from __future__ import annotations
 
 import getpass
+import importlib.util
 import io
 import json
 import logging
@@ -20,10 +21,9 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Sequence
+from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
 
 import click
 
@@ -46,11 +46,24 @@ except ImportError:
     RESET = "\033[0m"
 
 try:
-    from PIL import Image, ImageOps
-
-    HAS_PILLOW = True
-except ImportError:
+    HAS_PILLOW = importlib.util.find_spec("PIL") is not None
+except Exception:
     HAS_PILLOW = False
+
+# urllib.request symbols are lazily loaded on first network request
+Request: Any = None
+urlopen: Any = None
+
+
+def _ensure_urllib() -> None:
+    """Lazily load urllib.request module on demand."""
+    global Request, urlopen
+    if Request is None or urlopen is None:
+        from urllib.request import Request as _Request, urlopen as _urlopen
+        if Request is None:
+            Request = _Request
+        if urlopen is None:
+            urlopen = _urlopen
 
 try:
     import tomllib
@@ -399,38 +412,82 @@ def is_valid_image_file(image_path: Path) -> bool:
         if extension not in SUPPORTED_IMAGE_EXTENSIONS:
             return False
 
-        if extension == ".svg":
-            return image_path.stat().st_size > 0
+        file_size = image_path.stat().st_size
+        if file_size <= 0:
+            return False
 
+        # Read first bytes to perform fast magic-byte header validation
+        with open(image_path, "rb") as file_handle:
+            header = file_handle.read(1024 if extension == ".svg" else 32)
+
+        if extension in (".jpg", ".jpeg"):
+            if header.startswith(b"\xff\xd8\xff"):
+                return True
+        elif extension == ".png":
+            if header.startswith(b"\x89PNG"):
+                return True
+        elif extension == ".webp":
+            if len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+                return True
+        elif extension == ".bmp":
+            if header.startswith(b"BM"):
+                return True
+        elif extension in (".tiff", ".tif"):
+            if (
+                header.startswith(b"II*")
+                or header.startswith(b"MM\x00*")
+                or header.startswith(b"MM*")
+            ):
+                return True
+        elif extension == ".svg":
+            stripped = header.lstrip().lower()
+            if stripped.startswith(b"<svg") or stripped.startswith(b"<?xml") or b"<svg" in stripped:
+                return True
+
+        # Graceful fallback: try Pillow if available
         if HAS_PILLOW:
-            with Image.open(image_path) as opened_image:
-                opened_image.verify()
-            return True
+            try:
+                from PIL import Image
 
-        return image_path.stat().st_size > 0
-    except (OSError, IOError, SyntaxError, getattr(Image, "UnidentifiedImageError", Exception)):
+                with Image.open(image_path) as opened_image:
+                    opened_image.verify()
+                return True
+            except Exception:
+                return False
+
+        return False
+    except (OSError, IOError, ValueError):
         return False
 
 
 def file_validator(directory_path: str | Path, recursive: bool = False) -> list[str]:
     """Return sorted string paths of all readable images inside a directory."""
-    folder = Path(directory_path)
-    if not folder.exists() or not folder.is_dir():
+    dir_path = str(directory_path)
+    if not os.path.isdir(dir_path):
         return []
 
-    try:
-        if recursive:
-            folder_entries = sorted(entry for entry in folder.rglob("*") if entry.is_file())
-        else:
-            folder_entries = sorted(entry for entry in folder.iterdir() if entry.is_file())
-    except (PermissionError, OSError):
-        return []
+    valid_paths: list[str] = []
 
-    valid_paths: list[str] = [
-        str(entry.resolve())
-        for entry in folder_entries
-        if is_valid_image_file(entry)
-    ]
+    def _scan(current_dir: str) -> None:
+        try:
+            with os.scandir(current_dir) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file(follow_symlinks=True):
+                            _, ext = os.path.splitext(entry.name)
+                            if ext.lower() in SUPPORTED_IMAGE_EXTENSIONS:
+                                file_path = Path(entry.path)
+                                if is_valid_image_file(file_path):
+                                    valid_paths.append(str(file_path.resolve()))
+                        elif recursive and entry.is_dir(follow_symlinks=False):
+                            _scan(entry.path)
+                    except (PermissionError, OSError):
+                        continue
+        except (PermissionError, OSError):
+            return
+
+    _scan(dir_path)
+    valid_paths.sort()
     return valid_paths
 
 
@@ -789,6 +846,11 @@ def create_spanned_wallpaper(
     if not HAS_PILLOW:
         return Path(resolved_paths[0])
 
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return Path(resolved_paths[0])
+
     cache_dir = Path.home() / ".cache" / "wchanger"
     cache_dir.mkdir(parents=True, exist_ok=True)
     if output_path is not None:
@@ -798,7 +860,7 @@ def create_spanned_wallpaper(
         # Alternate between two filenames so desktop environments (GNOME, Cinnamon, MATE)
         # detect URI change on every cycle and reload the wallpaper without caching
         _SPANNED_TOGGLE = 1 - _SPANNED_TOGGLE
-        target_output = cache_dir / f"multimonitor_spanned_{_SPANNED_TOGGLE}.png"
+        target_output = cache_dir / f"multimonitor_spanned_{_SPANNED_TOGGLE}.jpg"
 
     is_wayland = bool(
         os.environ.get("WAYLAND_DISPLAY")
@@ -809,12 +871,8 @@ def create_spanned_wallpaper(
     else:
         monitors = get_xrandr_monitors() or get_wayland_monitors()
 
-    opened_images: list[Image.Image] = []
     try:
-        for wallpaper_path in resolved_paths:
-            opened_images.append(Image.open(wallpaper_path).convert("RGB"))
-
-        resample_filter = getattr(Image, "Resampling", Image).LANCZOS
+        resample_filter = getattr(Image, "Resampling", Image).BILINEAR
 
         if monitors:
             minimum_x = min(monitor_geometry["x"] for monitor_geometry in monitors)
@@ -826,51 +884,75 @@ def create_spanned_wallpaper(
             canvas = Image.new("RGB", (canvas_width, canvas_height), color=(0, 0, 0))
 
             for monitor_index, monitor_geometry in enumerate(monitors):
-                source_image = opened_images[monitor_index % len(opened_images)]
-                if hasattr(ImageOps, "fit"):
-                    fitted = ImageOps.fit(
-                        source_image,
-                        (monitor_geometry["width"], monitor_geometry["height"]),
-                        method=resample_filter,
-                    )
-                else:
-                    fitted = source_image.resize(
-                        (monitor_geometry["width"], monitor_geometry["height"]),
-                        resample_filter,
-                    )
-                canvas.paste(
-                    fitted,
-                    (monitor_geometry["x"] - minimum_x, monitor_geometry["y"] - minimum_y),
-                )
+                wallpaper_path = resolved_paths[monitor_index % len(resolved_paths)]
+                with Image.open(wallpaper_path) as src:
+                    source_image = src.convert("RGB")
+                try:
+                    target_size = (monitor_geometry["width"], monitor_geometry["height"])
+                    if hasattr(ImageOps, "fit"):
+                        fitted = ImageOps.fit(
+                            source_image,
+                            target_size,
+                            method=resample_filter,
+                        )
+                    else:
+                        fitted = source_image.resize(target_size, resample_filter)
+                    try:
+                        canvas.paste(
+                            fitted,
+                            (monitor_geometry["x"] - minimum_x, monitor_geometry["y"] - minimum_y),
+                        )
+                    finally:
+                        if fitted is not source_image:
+                            fitted.close()
+                finally:
+                    source_image.close()
         else:
-            target_height = max(source_image.height for source_image in opened_images)
-            resized_images: list[Image.Image] = []
-            total_width = 0
+            dimensions: list[tuple[int, int]] = []
+            for wallpaper_path in resolved_paths:
+                with Image.open(wallpaper_path) as img:
+                    dimensions.append(img.size)
 
-            for source_image in opened_images:
-                aspect = source_image.width / source_image.height if source_image.height > 0 else 1.0
-                new_width = max(1, int(target_height * aspect))
-                resized = source_image.resize((new_width, target_height), resample_filter)
-                resized_images.append(resized)
-                total_width += new_width
+            target_height = max((h for _, h in dimensions), default=1080)
+            widths: list[int] = []
+            for w, h in dimensions:
+                aspect = w / h if h > 0 else 1.0
+                widths.append(max(1, int(target_height * aspect)))
+            total_width = sum(widths)
 
             canvas = Image.new("RGB", (total_width, target_height), color=(0, 0, 0))
             offset_x = 0
-            for resized_image in resized_images:
-                canvas.paste(resized_image, (offset_x, 0))
-                offset_x += resized_image.width
+            for wallpaper_path, new_width in zip(resolved_paths, widths):
+                with Image.open(wallpaper_path) as src:
+                    source_image = src.convert("RGB")
+                try:
+                    resized = source_image.resize((new_width, target_height), resample_filter)
+                    try:
+                        canvas.paste(resized, (offset_x, 0))
+                    finally:
+                        if resized is not source_image:
+                            resized.close()
+                finally:
+                    source_image.close()
+                offset_x += new_width
 
-        canvas.save(target_output, format="PNG")
+        if target_output.suffix.lower() == ".png":
+            canvas.save(target_output, format="PNG")
+        else:
+            canvas.save(target_output, format="JPEG", quality=92)
         return target_output
     except Exception as error:
         logging.warning(f"Failed to create spanned wallpaper: {error}")
         return Path(resolved_paths[0])
     finally:
-        for source_image in opened_images:
-            try:
-                source_image.close()
-            except Exception:
-                pass
+        try:
+            import ctypes
+
+            libc = ctypes.CDLL("libc.so.6")
+            if hasattr(libc, "malloc_trim"):
+                libc.malloc_trim(0)
+        except Exception:
+            pass
 
 
 def set_lxqt_multimonitor_config(file_paths: Sequence[str]) -> bool:
@@ -1247,6 +1329,7 @@ def _fetch_url_with_retry(
     retry_delay_seconds: float = 0.5,
 ) -> bytes:
     """Execute urlopen with automatic retry on transient network failures."""
+    _ensure_urllib()
     last_network_error: Exception | None = None
     for attempt in range(max_retries):
         try:
@@ -1272,6 +1355,7 @@ def _fetch_url_with_retry(
 
 def fetch_wallhaven_url(max_retries: int = 3, retry_delay_seconds: float = 0.5) -> str:
     """Fetch a random top wallpaper image URL from the Wallhaven API with retries."""
+    _ensure_urllib()
     api_url = (
         "https://wallhaven.cc/api/v1/search?sorting=toplist&topRange=1d&purity=100&atleast=1920x1080"
     )
@@ -1295,6 +1379,7 @@ def fetch_wallhaven_url(max_retries: int = 3, retry_delay_seconds: float = 0.5) 
 
 def fetch_bing_url(max_retries: int = 3, retry_delay_seconds: float = 0.5) -> str:
     """Fetch today's Bing daily photo URL with retries."""
+    _ensure_urllib()
     api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US"
     request = Request(api_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
     raw_payload = _fetch_url_with_retry(
@@ -1339,19 +1424,46 @@ def download_online_wallpaper(
     max_retries: int = 3,
     retry_delay_seconds: float = 0.5,
 ) -> Path:
-    """Download remote image from URL and write to local destination cache with retries."""
+    """Download remote image from URL and stream to destination cache with retries."""
+    _ensure_urllib()
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     request = Request(image_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
-    image_data = _fetch_url_with_retry(
-        request,
-        timeout=20,
-        max_retries=max_retries,
-        retry_delay_seconds=retry_delay_seconds,
-    )
-    if not image_data:
-        raise ValueError("Received empty image content from provider.")
-    destination_path.write_bytes(image_data)
-    return destination_path
+    chunk_size = 64 * 1024
+    last_network_error: Exception | None = None
+
+    for attempt in range(max_retries):
+        try:
+            with urlopen(request, timeout=20) as response:
+                bytes_written = 0
+                with open(destination_path, "wb") as destination_file:
+                    while True:
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+                        destination_file.write(chunk)
+                        bytes_written += len(chunk)
+                if bytes_written == 0:
+                    destination_path.unlink(missing_ok=True)
+                    raise ValueError("Received empty image content from provider.")
+                return destination_path
+        except HTTPError as http_error:
+            destination_path.unlink(missing_ok=True)
+            last_network_error = http_error
+            if http_error.code in (500, 502, 503, 504) and attempt < max_retries - 1:
+                time.sleep(retry_delay_seconds * (2 ** attempt))
+                continue
+            raise
+        except (URLError, TimeoutError, ConnectionError, OSError) as network_error:
+            destination_path.unlink(missing_ok=True)
+            last_network_error = network_error
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay_seconds * (2 ** attempt))
+                continue
+            raise
+
+    if last_network_error:
+        raise last_network_error
+    raise ValueError("Received empty image content from provider.")
 
 
 def cleanup_download_cache(
@@ -1359,33 +1471,35 @@ def cleanup_download_cache(
     keep_last: int = DEFAULT_KEEP_LAST,
 ) -> list[Path]:
     """Keep only the most recent 'keep_last' image files in cache_dir, deleting older ones."""
-    folder = Path(cache_dir)
-    if not folder.exists() or not folder.is_dir():
+    dir_path = str(cache_dir)
+    if not os.path.isdir(dir_path):
         return []
 
     effective_keep_limit = max(1, keep_last)
 
+    entries_with_mtime: list[tuple[str, float]] = []
     try:
-        image_files: list[Path] = [
-            entry
-            for entry in folder.iterdir()
-            if entry.is_file() and entry.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-        ]
+        with os.scandir(dir_path) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_file(follow_symlinks=True):
+                        _, ext = os.path.splitext(entry.name)
+                        if ext.lower() in SUPPORTED_IMAGE_EXTENSIONS:
+                            entries_with_mtime.append((entry.path, entry.stat().st_mtime))
+                except (PermissionError, OSError):
+                    continue
     except (PermissionError, OSError) as error:
-        logging.warning(f"Failed to scan cache directory '{folder}' for cleanup: {error}")
+        logging.warning(f"Failed to scan cache directory '{dir_path}' for cleanup: {error}")
         return []
 
-    if len(image_files) <= effective_keep_limit:
+    if len(entries_with_mtime) <= effective_keep_limit:
         return []
 
-    try:
-        image_files.sort(key=lambda file_path: file_path.stat().st_mtime, reverse=True)
-    except OSError as error:
-        logging.warning(f"Failed to inspect timestamps in cache directory '{folder}': {error}")
-        return []
+    entries_with_mtime.sort(key=lambda item: item[1], reverse=True)
 
     deleted_files: list[Path] = []
-    for stale_file in image_files[effective_keep_limit:]:
+    for file_path_str, _ in entries_with_mtime[effective_keep_limit:]:
+        stale_file = Path(file_path_str)
         try:
             stale_file.unlink(missing_ok=True)
             deleted_files.append(stale_file)

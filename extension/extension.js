@@ -18,7 +18,7 @@ function runCommandAsync(argv, onFinished = null) {
     try {
         const proc = new Gio.Subprocess({
             argv: argv,
-            flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            flags: Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE,
         });
         proc.init(null);
         proc.wait_async(null, (procObj, res) => {
@@ -111,6 +111,12 @@ class HistoryManager {
 
     recordWallpaper(filePath) {
         if (!filePath) return;
+
+        // If current position already matches the wallpaper, do nothing (prevents circular navigation bug)
+        if (this._currentIndex >= 0 && this._currentIndex < this._history.length && this._history[this._currentIndex] === filePath) {
+            return;
+        }
+
         // Avoid duplicate consecutive entries
         if (this._history.length > 0 && this._history[this._history.length - 1] === filePath) {
             this._currentIndex = this._history.length - 1;
@@ -183,8 +189,11 @@ class WchangerIndicator extends PanelMenu.Button {
         this._buildMenu();
         this._syncCurrentBackground();
 
-        // Listen for external wallpaper changes to keep history in sync
+        // Listen for external wallpaper changes to keep history in sync (both light and dark modes)
         this._bgChangedId = this._bgSettings.connect('changed::picture-uri', () => {
+            this._syncCurrentBackground();
+        });
+        this._bgDarkChangedId = this._bgSettings.connect('changed::picture-uri-dark', () => {
             this._syncCurrentBackground();
         });
     }
@@ -193,6 +202,10 @@ class WchangerIndicator extends PanelMenu.Button {
         if (this._bgChangedId) {
             this._bgSettings.disconnect(this._bgChangedId);
             this._bgChangedId = null;
+        }
+        if (this._bgDarkChangedId) {
+            this._bgSettings.disconnect(this._bgDarkChangedId);
+            this._bgDarkChangedId = null;
         }
         super.destroy();
     }
@@ -382,25 +395,59 @@ class WchangerIndicator extends PanelMenu.Button {
         const baseName = sourceFile.get_basename();
         const destFile = Gio.File.new_for_path(`${favDir}/${baseName}`);
 
-        try {
-            sourceFile.copy(destFile, Gio.FileCopyFlags.OVERWRITE, null, null);
-            Main.notify(
-                '⭐ Anahita Wallpaper Changer',
-                `${_('Saved to Favorites:')} ${baseName}`
-            );
-        } catch (e) {
-            logError(e, '[wchanger-extension] Failed to copy wallpaper to favorites');
-            Main.notify('Anahita Wallpaper Changer', _('Failed to save to favorites.'));
-        }
+        sourceFile.copy_async(
+            destFile,
+            Gio.FileCopyFlags.OVERWRITE,
+            GLib.PRIORITY_DEFAULT,
+            null,
+            null,
+            (file, res) => {
+                try {
+                    file.copy_finish(res);
+                    Main.notify(
+                        '⭐ Anahita Wallpaper Changer',
+                        `${_('Saved to Favorites:')} ${baseName}`
+                    );
+                } catch (e) {
+                    logError(e, '[wchanger-extension] Failed to copy wallpaper to favorites');
+                    Main.notify('Anahita Wallpaper Changer', _('Failed to save to favorites.'));
+                }
+            }
+        );
     }
 
     _checkServiceState() {
+        if (!GLib.find_program_in_path('systemctl')) {
+            this._serviceSwitch.setToggleState(false);
+            return;
+        }
+
         try {
-            const [res, stdout, stderr, status] = GLib.spawn_command_line_sync(
-                'systemctl --user is-active wallpaper-changer.service'
+            Gio.DBus.session.call(
+                'org.freedesktop.systemd1',
+                '/org/freedesktop/systemd1',
+                'org.freedesktop.systemd1.Manager',
+                'ListUnitsByNames',
+                new GLib.Variant('(as)', [['wallpaper-changer.service']]),
+                new GLib.VariantType('(a(ssssssouso))'),
+                Gio.DBusCallFlags.NONE,
+                -1,
+                null,
+                (connection, res) => {
+                    try {
+                        const reply = connection.call_finish(res);
+                        const [units] = reply.deepUnpack();
+                        if (units && units.length > 0) {
+                            const activeState = units[0][3];
+                            this._serviceSwitch.setToggleState(activeState === 'active');
+                        } else {
+                            this._serviceSwitch.setToggleState(false);
+                        }
+                    } catch (e) {
+                        this._serviceSwitch.setToggleState(false);
+                    }
+                }
             );
-            const active = new TextDecoder().decode(stdout).trim() === 'active';
-            this._serviceSwitch.setToggleState(active);
         } catch (e) {
             this._serviceSwitch.setToggleState(false);
         }

@@ -1637,7 +1637,7 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_download_online_wallpaper_success(self, mock_urlopen: MagicMock) -> None:
         """download_online_wallpaper should fetch bytes and write to destination path."""
         fake_response = MagicMock()
-        fake_response.read.return_value = b"FAKE_IMAGE_BYTES_123"
+        fake_response.read.side_effect = [b"FAKE_IMAGE_BYTES_123", b""]
         fake_response.__enter__.return_value = fake_response
         mock_urlopen.return_value = fake_response
 
@@ -3382,6 +3382,117 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertTrue(generated_path.exists())
         with Image.open(generated_path) as resulting_image:
             self.assertEqual(resulting_image.size, (3840, 1080))
+
+    def test_magic_byte_validation_formats(self) -> None:
+        """is_valid_image_file should recognize valid magic bytes for all supported formats."""
+        # JPEG
+        jpeg_file = self.test_dir / "valid.jpg"
+        jpeg_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+        self.assertTrue(wchanger.is_valid_image_file(jpeg_file))
+
+        # PNG
+        png_file = self.test_dir / "valid.png"
+        png_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+        self.assertTrue(wchanger.is_valid_image_file(png_file))
+
+        # WebP
+        webp_file = self.test_dir / "valid.webp"
+        webp_file.write_bytes(b"RIFF\x24\x00\x00\x00WEBPVP8 \x18\x00\x00\x00")
+        self.assertTrue(wchanger.is_valid_image_file(webp_file))
+
+        # BMP
+        bmp_file = self.test_dir / "valid.bmp"
+        bmp_file.write_bytes(b"BM\x36\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00")
+        self.assertTrue(wchanger.is_valid_image_file(bmp_file))
+
+        # TIFF little-endian
+        tiff_le = self.test_dir / "valid_le.tiff"
+        tiff_le.write_bytes(b"II*\x00\x08\x00\x00\x00")
+        self.assertTrue(wchanger.is_valid_image_file(tiff_le))
+
+        # TIFF big-endian
+        tiff_be = self.test_dir / "valid_be.tiff"
+        tiff_be.write_bytes(b"MM\x00*\x00\x00\x00\x08")
+        self.assertTrue(wchanger.is_valid_image_file(tiff_be))
+
+        # SVG xml declaration
+        svg_xml = self.test_dir / "valid_xml.svg"
+        svg_xml.write_text("<?xml version=\"1.0\" encoding=\"UTF-8\"?><svg width=\"100\" height=\"100\"></svg>")
+        self.assertTrue(wchanger.is_valid_image_file(svg_xml))
+
+        # SVG direct tag
+        svg_direct = self.test_dir / "valid_direct.svg"
+        svg_direct.write_text("<svg viewBox=\"0 0 10 10\"></svg>")
+        self.assertTrue(wchanger.is_valid_image_file(svg_direct))
+
+        # Corrupted / invalid file
+        corrupt_jpg = self.test_dir / "corrupt.jpg"
+        corrupt_jpg.write_bytes(b"NOT_A_JPEG_FILE_HEADER")
+        self.assertFalse(wchanger.is_valid_image_file(corrupt_jpg))
+
+        # 0-byte file
+        empty_jpg = self.test_dir / "empty.jpg"
+        empty_jpg.write_bytes(b"")
+        self.assertFalse(wchanger.is_valid_image_file(empty_jpg))
+
+    def test_file_validator_scandir_filtering(self) -> None:
+        """file_validator should only validate image extensions and return sorted list."""
+        valid_img = self.test_dir / "b_valid.png"
+        valid_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+        valid_img2 = self.test_dir / "a_valid.jpg"
+        valid_img2.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+        text_file = self.test_dir / "c_notes.txt"
+        text_file.write_text("not an image")
+        py_file = self.test_dir / "script.py"
+        py_file.write_text("print('hello')")
+
+        results = wchanger.file_validator(self.test_dir)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0], str(valid_img2.resolve()))
+        self.assertEqual(results[1], str(valid_img.resolve()))
+
+    @patch("wchanger.get_xrandr_monitors", return_value=[])
+    @patch("wchanger.get_wayland_monitors", return_value=[])
+    def test_create_spanned_wallpaper_default_jpeg(
+        self, mock_wayland: MagicMock, mock_xrandr: MagicMock
+    ) -> None:
+        """create_spanned_wallpaper should generate .jpg output alternating filenames when output_path is None."""
+        img1 = self.test_dir / "span1.png"
+        img2 = self.test_dir / "span2.png"
+        Image.new("RGB", (100, 80), color="red").save(img1)
+        Image.new("RGB", (100, 80), color="blue").save(img2)
+
+        res = wchanger.create_spanned_wallpaper([img1, img2])
+        self.assertTrue(res.name.endswith(".jpg"))
+        self.assertTrue(res.exists())
+        with Image.open(res) as img:
+            self.assertEqual(img.format, "JPEG")
+
+    def test_download_online_wallpaper_streaming(self) -> None:
+        """download_online_wallpaper should stream chunks to disk and delete on error."""
+        chunk_data = [b"A" * 65536, b"B" * 1024, b""]
+        mock_resp = MagicMock()
+        mock_resp.read.side_effect = chunk_data
+        mock_resp.__enter__.return_value = mock_resp
+
+        dest = self.test_dir / "stream_dest.jpg"
+        with patch("wchanger.urlopen", return_value=mock_resp):
+            out_path = wchanger.download_online_wallpaper("https://example.com/stream.jpg", dest)
+            self.assertEqual(out_path, dest)
+            self.assertEqual(dest.stat().st_size, 65536 + 1024)
+
+    def test_download_online_wallpaper_cleans_up_on_error(self) -> None:
+        """download_online_wallpaper should delete destination file if an exception occurs during streaming."""
+        mock_resp = MagicMock()
+        mock_resp.read.side_effect = [b"partial_data", URLError("Connection lost")]
+        mock_resp.__enter__.return_value = mock_resp
+
+        dest = self.test_dir / "failed_stream.jpg"
+        with patch("wchanger.urlopen", return_value=mock_resp):
+            with patch("time.sleep"):
+                with self.assertRaises(URLError):
+                    wchanger.download_online_wallpaper("https://example.com/broken.jpg", dest, max_retries=1)
+        self.assertFalse(dest.exists())
 
 
 if __name__ == "__main__":
