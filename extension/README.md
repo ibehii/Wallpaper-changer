@@ -7,7 +7,8 @@ A high-performance, non-blocking GNOME Shell Extension companion for **Anahita W
 ## ✨ Features
 
 - **⏮ Previous Wallpaper (Back)**: Move backward through your recent wallpaper history without re-downloading or re-scanning.
-- **⏭ Next Wallpaper**: Trigger immediate wallpaper rotation or step forward in history.
+- **⏭ Next Wallpaper**: Trigger immediate wallpaper rotation or step forward in history (respects selected source: local folder or online provider).
+- **📁 Local Photos (Folder Rotation)**: Rotate wallpapers randomly from a selected local folder (`~/Pictures/Wallpapers` or custom directory) with subfolder recursion and instant switching.
 - **⭐ Add to Favorites**: One-click bookmarking of your current desktop wallpaper into `~/Pictures/Wallpapers/Favorites/` with instant desktop notification.
 - **🌐 Online Provider Quick-Switch**: Rotate on demand directly from **Wallhaven**, **Bing Daily**, **Lorem Picsum**, or **LoremFlickr**.
 - **🖥️ Multi-Monitor Support**: Native trigger for multi-display spanning.
@@ -61,8 +62,12 @@ gnome-extensions prefs wchanger@ibehii.github.com
 ```
 
 - **Show Indicator in Top Bar**: Toggle visibility in GNOME top bar.
-- **Favorites Folder Path**: Customize destination directory for saved wallpapers.
-- **Default Online Provider**: Select default image curation provider.
+- **Favorites Folder Path**: Customize destination directory for saved wallpapers with folder chooser.
+- **Local Photos Folder**: Select local wallpapers folder via file chooser or manual path.
+- **Wallpaper Source**: Choose whether Background Rotator rotates from Local Folder or Online Provider.
+- **Scan Subfolders**: Recursively include images in subdirectories of the local photos folder.
+- **Default Online Provider**: Select default image curation provider (Wallhaven, Bing, Picsum, LoremFlickr).
+- **Background Rotator Interval**: Configure minutes between automatic rotations.
 - **Multi-Monitor Spanning**: Enable `-m` spanning mode by default.
 
 ---

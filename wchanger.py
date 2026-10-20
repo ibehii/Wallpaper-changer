@@ -1466,6 +1466,110 @@ def download_online_wallpaper(
     raise ValueError("Received empty image content from provider.")
 
 
+def get_prefetch_candidate(
+    cache_dir: Path | str,
+    provider: str,
+    monitor_index: int | None = None,
+) -> Path | None:
+    """Find a ready prefetched wallpaper file for the provider if available and valid."""
+    dir_path = str(cache_dir)
+    if not os.path.isdir(dir_path):
+        return None
+
+    suffix_pattern = f"_m{monitor_index}" if monitor_index is not None else ""
+    prefix = f"prefetch_{provider.lower()}{suffix_pattern}"
+
+    try:
+        with os.scandir(dir_path) as entries:
+            for entry in entries:
+                if (
+                    entry.is_file(follow_symlinks=True)
+                    and entry.name.startswith(prefix)
+                    and not entry.name.endswith(".tmp")
+                    and "_part" not in entry.name
+                ):
+                    _, ext = os.path.splitext(entry.name)
+                    if ext.lower() in SUPPORTED_IMAGE_EXTENSIONS:
+                        candidate_path = Path(entry.path)
+                        if is_valid_image_file(candidate_path):
+                            return candidate_path
+    except (OSError, PermissionError):
+        pass
+    return None
+
+
+def prefetch_online_wallpaper(
+    provider: str,
+    cache_dir: Path | str | None = None,
+    multi_monitor: bool = False,
+    desktop_environment: str | None = None,
+) -> list[Path]:
+    """Download the next candidate wallpaper from an online provider into the prefetch cache."""
+    provider_key = provider.lower()
+    fetcher = ONLINE_PROVIDERS.get(provider_key)
+    if fetcher is None:
+        return []
+
+    target_cache_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    target_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    monitor_count = get_effective_monitor_count(desktop_environment, multi_monitor=True) if multi_monitor else 1
+    prefetched_paths: list[Path] = []
+
+    for idx in range(monitor_count):
+        try:
+            image_url = fetcher()
+            parsed_path = Path(urlparse(image_url).path).suffix.lower()
+            extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+            suffix = f"_m{idx}" if multi_monitor else ""
+            final_path = target_cache_dir / f"prefetch_{provider_key}{suffix}{extension}"
+            temp_path = target_cache_dir / f"prefetch_{provider_key}{suffix}_part{extension}"
+
+            download_online_wallpaper(image_url, temp_path)
+            if is_valid_image_file(temp_path):
+                temp_path.replace(final_path)
+                prefetched_paths.append(final_path)
+            else:
+                temp_path.unlink(missing_ok=True)
+        except Exception as error:
+            logging.debug(f"Failed to prefetch online wallpaper for '{provider_key}': {error}")
+
+    return prefetched_paths
+
+
+def spawn_background_prefetch(
+    provider: str,
+    target_cache_dir: Path | str | None = None,
+    multi_monitor: bool = False,
+    desktop_environment: str | None = None,
+) -> None:
+    """Spawn an asynchronous background job to prefetch the next online wallpaper."""
+    try:
+        import subprocess
+
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--online",
+            provider.lower(),
+            "--no-config",
+            "--prefetch-only",
+        ]
+        if multi_monitor:
+            cmd.append("--multi-monitor")
+        if desktop_environment:
+            cmd.append(f"--{desktop_environment.lower()}")
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as error:
+        logging.debug(f"Could not spawn background prefetch: {error}")
+
+
 def cleanup_download_cache(
     cache_dir: Path | str,
     keep_last: int = DEFAULT_KEEP_LAST,
@@ -1716,8 +1820,9 @@ def run_online_wallpaper_cycle(
     cache_dir: Path | None = None,
     keep_last: int = DEFAULT_KEEP_LAST,
     multi_monitor: bool = False,
+    prefetch: bool = True,
 ) -> None:
-    """Cycle wallpapers from an online provider in a loop with error handling and cache cleanup."""
+    """Cycle wallpapers from an online provider in a loop with error handling, prefetch caching, and cache cleanup."""
     provider_key = provider.lower()
     fetcher = ONLINE_PROVIDERS.get(provider_key)
     if fetcher is None:
@@ -1731,19 +1836,30 @@ def run_online_wallpaper_cycle(
             cycle_succeeded = False
             try:
                 if not multi_monitor:
-                    if output_mode != "log":
-                        print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'...{RESET}")
+                    image_url_info: str = ""
+                    prefetched = get_prefetch_candidate(target_cache_dir, provider_key) if prefetch else None
+                    if prefetched is not None:
+                        timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
+                        random_identifier = random.randint(1000, 9999)
+                        cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}{prefetched.suffix}"
+                        prefetched.replace(cache_file)
+                        image_url_info = "pre-fetched instant image"
+                        if output_mode != "log":
+                            print(f"{CYAN}[i] Using pre-fetched instant wallpaper from '{provider_key}'...{RESET}")
+                    else:
+                        if output_mode != "log":
+                            print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'...{RESET}")
 
-                    image_url = fetcher()
+                        image_url = fetcher()
+                        image_url_info = image_url
+                        parsed_path = Path(urlparse(image_url).path).suffix.lower()
+                        extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
 
-                    parsed_path = Path(urlparse(image_url).path).suffix.lower()
-                    extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+                        timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
+                        random_identifier = random.randint(1000, 9999)
+                        cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}{extension}"
 
-                    timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
-                    random_identifier = random.randint(1000, 9999)
-                    cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}{extension}"
-
-                    download_online_wallpaper(image_url, cache_file)
+                        download_online_wallpaper(image_url, cache_file)
 
                     operation_success, status_message = set_wallpaper_for_desktop(
                         desktop_environment=desktop_environment,
@@ -1753,7 +1869,7 @@ def run_online_wallpaper_cycle(
 
                     if operation_success:
                         cycle_succeeded = True
-                        log_detail = f"Online wallpaper updated from {provider_key}: {image_url}"
+                        log_detail = f"Online wallpaper updated from {provider_key}: {image_url_info}"
                         if output_mode == "log":
                             logging.info(log_detail)
                         else:
@@ -1764,6 +1880,14 @@ def run_online_wallpaper_cycle(
                             logging.info(
                                 f"Cleaned {len(pruned_files)} old cached wallpaper(s) (retaining last {keep_last})."
                             )
+
+                        if prefetch:
+                            spawn_background_prefetch(
+                                provider=provider_key,
+                                target_cache_dir=target_cache_dir,
+                                multi_monitor=False,
+                                desktop_environment=desktop_environment,
+                            )
                     else:
                         failure_message = f"Failed to set online wallpaper to desktop ({desktop_environment})."
                         if output_mode == "log":
@@ -1772,23 +1896,50 @@ def run_online_wallpaper_cycle(
                             print(f"{RED}{failure_message}{RESET}", file=sys.stderr)
                 else:
                     monitor_count = get_effective_monitor_count(desktop_environment, multi_monitor=True)
-                    if output_mode != "log":
-                        print(
-                            f"{CYAN}[i] Fetching {monitor_count} online wallpapers from '{provider_key}' for multi-monitor...{RESET}"
-                        )
-
                     cache_files: list[Path] = []
                     wallpaper_urls: list[str] = []
-                    for monitor_index in range(monitor_count):
-                        image_url = fetcher()
-                        wallpaper_urls.append(image_url)
-                        parsed_path = Path(urlparse(image_url).path).suffix.lower()
-                        extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+
+                    all_prefetched = True
+                    candidate_prefetches: list[Path] = []
+                    if prefetch:
+                        for monitor_index in range(monitor_count):
+                            candidate = get_prefetch_candidate(target_cache_dir, provider_key, monitor_index=monitor_index)
+                            if candidate is not None:
+                                candidate_prefetches.append(candidate)
+                            else:
+                                all_prefetched = False
+                                break
+                    else:
+                        all_prefetched = False
+
+                    if all_prefetched and len(candidate_prefetches) == monitor_count:
+                        if output_mode != "log":
+                            print(
+                                f"{CYAN}[i] Using {monitor_count} pre-fetched instant wallpapers from '{provider_key}' for multi-monitor...{RESET}"
+                            )
                         timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
-                        random_identifier = random.randint(1000, 9999)
-                        cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}_m{monitor_index}{extension}"
-                        download_online_wallpaper(image_url, cache_file)
-                        cache_files.append(cache_file)
+                        for monitor_index, prefetched_file in enumerate(candidate_prefetches):
+                            random_identifier = random.randint(1000, 9999)
+                            cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}_m{monitor_index}{prefetched_file.suffix}"
+                            prefetched_file.replace(cache_file)
+                            cache_files.append(cache_file)
+                            wallpaper_urls.append("pre-fetched instant image")
+                    else:
+                        if output_mode != "log":
+                            print(
+                                f"{CYAN}[i] Fetching {monitor_count} online wallpapers from '{provider_key}' for multi-monitor...{RESET}"
+                            )
+
+                        for monitor_index in range(monitor_count):
+                            image_url = fetcher()
+                            wallpaper_urls.append(image_url)
+                            parsed_path = Path(urlparse(image_url).path).suffix.lower()
+                            extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+                            timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
+                            random_identifier = random.randint(1000, 9999)
+                            cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}_m{monitor_index}{extension}"
+                            download_online_wallpaper(image_url, cache_file)
+                            cache_files.append(cache_file)
 
                     operation_success, status_message = set_wallpaper_for_desktop(
                         desktop_environment=desktop_environment,
@@ -1808,6 +1959,14 @@ def run_online_wallpaper_cycle(
                         if pruned_files and output_mode == "log":
                             logging.info(
                                 f"Cleaned {len(pruned_files)} old cached wallpaper(s) (retaining last {keep_last})."
+                            )
+
+                        if prefetch:
+                            spawn_background_prefetch(
+                                provider=provider_key,
+                                target_cache_dir=target_cache_dir,
+                                multi_monitor=True,
+                                desktop_environment=desktop_environment,
                             )
                     else:
                         failure_message = f"Failed to set online wallpapers to desktop ({desktop_environment})."
@@ -2228,6 +2387,18 @@ setup_install_autostart = setup_install_autostart_service
     default=False,
     help="Disable loading settings from config.toml.",
 )
+@click.option(
+    "--prefetch/--no-prefetch",
+    default=True,
+    help="Pre-download the next online wallpaper in the background for zero-latency switching.",
+)
+@click.option(
+    "--prefetch-only",
+    is_flag=True,
+    default=False,
+    hidden=True,
+    help="Silently prefetch candidate online wallpaper and exit.",
+)
 @click.argument(
     "photo_path",
     type=click.Path(file_okay=False, dir_okay=True, resolve_path=True, path_type=Path),
@@ -2251,6 +2422,8 @@ def cli(
     keep_last: int | None,
     config_file: Path | None,
     no_config: bool,
+    prefetch: bool,
+    prefetch_only: bool,
     photo_path: Path | None,
     multi_monitor: bool = False,
 ) -> None:
@@ -2327,6 +2500,20 @@ def cli(
     custom_cache_dir: Path | None = None
     if "cache_dir" in config_settings:
         custom_cache_dir = Path(os.path.expanduser(str(config_settings["cache_dir"])))
+
+    prefetch_from_cli = click_context.get_parameter_source("prefetch") == click.core.ParameterSource.COMMANDLINE
+    if not prefetch_from_cli and "prefetch" in config_settings:
+        prefetch = bool(config_settings["prefetch"])
+
+    if prefetch_only:
+        target_provider = online or str(config_settings.get("online", "wallhaven"))
+        prefetch_online_wallpaper(
+            provider=target_provider,
+            cache_dir=custom_cache_dir,
+            multi_monitor=multi_monitor,
+            desktop_environment=desktop_override,
+        )
+        sys.exit(0)
 
     photo_path_from_cli = click_context.get_parameter_source("photo_path") == click.core.ParameterSource.COMMANDLINE
     online_from_cli = click_context.get_parameter_source("online") == click.core.ParameterSource.COMMANDLINE
@@ -2460,6 +2647,7 @@ def cli(
                 cache_dir=custom_cache_dir,
                 keep_last=keep_last,
                 multi_monitor=multi_monitor,
+                prefetch=prefetch,
             )
             sys.exit(0)
 
@@ -2486,6 +2674,7 @@ def cli(
             cache_dir=custom_cache_dir,
             keep_last=keep_last,
             multi_monitor=multi_monitor,
+            prefetch=prefetch,
         )
         return
 

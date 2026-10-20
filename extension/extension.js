@@ -10,6 +10,111 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 
 const GNOME_BG_SCHEMA = 'org.gnome.desktop.background';
 const MAX_HISTORY_ITEMS = 50;
+const SUPPORTED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.svg', '.tiff']);
+
+/**
+ * Recursively or non-recursively enumerate image files in a directory.
+ * Safely guards against circular symlinks, deep nesting, and limits file count for UI responsiveness.
+ * Returns an array of absolute path strings.
+ */
+function scanLocalPhotos(dirPath, recursive = false) {
+    const results = [];
+    if (!dirPath || typeof dirPath !== 'string') return results;
+
+    let expandedPath = dirPath.trim();
+    if (expandedPath.length === 0) return results;
+    if (expandedPath.startsWith('~')) {
+        expandedPath = `${GLib.get_home_dir()}${expandedPath.substring(1)}`;
+    }
+
+    const dir = Gio.File.new_for_path(expandedPath);
+    try {
+        if (!dir.query_exists(null)) return results;
+    } catch (e) {
+        return results;
+    }
+
+    const visitedDirs = new Set();
+    const MAX_DEPTH = 6;
+    const MAX_FILES = 5000;
+
+    function _scan(directory, depth) {
+        if (depth > MAX_DEPTH || results.length >= MAX_FILES) return;
+
+        let dirPathStr;
+        try {
+            dirPathStr = directory.get_path();
+        } catch (e) {
+            return;
+        }
+        if (!dirPathStr || visitedDirs.has(dirPathStr)) return;
+        visitedDirs.add(dirPathStr);
+
+        let enumerator = null;
+        try {
+            enumerator = directory.enumerate_children(
+                'standard::name,standard::type,standard::is-symlink',
+                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                null
+            );
+        } catch (e) {
+            return;
+        }
+
+        try {
+            let info;
+            while ((info = enumerator.next_file(null)) !== null) {
+                if (results.length >= MAX_FILES) break;
+
+                const name = info.get_name();
+                if (!name || name.startsWith('.')) continue;
+
+                const child = directory.get_child(name);
+                const fileType = info.get_file_type();
+                const isSymlink = info.get_is_symlink();
+
+                if (fileType === Gio.FileType.REGULAR) {
+                    const lowerName = name.toLowerCase();
+                    const dotIndex = lowerName.lastIndexOf('.');
+                    if (dotIndex >= 0) {
+                        const ext = lowerName.substring(dotIndex);
+                        if (SUPPORTED_IMAGE_EXTENSIONS.has(ext)) {
+                            const childPath = child.get_path();
+                            if (childPath) results.push(childPath);
+                        }
+                    }
+                } else if (recursive && fileType === Gio.FileType.DIRECTORY && !isSymlink) {
+                    _scan(child, depth + 1);
+                }
+            }
+        } catch (e) {
+            // Protect against directory read errors
+        } finally {
+            try {
+                if (enumerator) enumerator.close(null);
+            } catch (e) {}
+        }
+    }
+
+    _scan(dir, 0);
+    results.sort();
+    return results;
+}
+
+let _localPhotosCache = { dir: '', recursive: false, timestamp: 0, photos: [] };
+
+function getLocalPhotos(dirPath, recursive = false, forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh &&
+        _localPhotosCache.dir === dirPath &&
+        _localPhotosCache.recursive === recursive &&
+        (now - _localPhotosCache.timestamp) < 5000) {
+        return _localPhotosCache.photos;
+    }
+    const photos = scanLocalPhotos(dirPath, recursive);
+    _localPhotosCache = { dir: dirPath, recursive, timestamp: now, photos };
+    return photos;
+}
 
 /**
  * Execute an arbitrary command asynchronously with Gio.Subprocess
@@ -248,6 +353,13 @@ class WchangerIndicator extends PanelMenu.Button {
             }
         });
 
+        this._wallpaperSourceChangedId = this._settings.connect('changed::wallpaper-source', () => {
+            const isLocal = this._settings.get_string('wallpaper-source') === 'local';
+            if (this._useLocalSourceSwitch && this._useLocalSourceSwitch.state !== isLocal) {
+                this._useLocalSourceSwitch.setToggleState(isLocal);
+            }
+        });
+
         // Listen for external wallpaper changes to keep history in sync (both light and dark modes)
         this._bgChangedId = this._bgSettings.connect('changed::picture-uri', () => {
             this._syncCurrentBackground();
@@ -270,6 +382,10 @@ class WchangerIndicator extends PanelMenu.Button {
             this._settings.disconnect(this._rotatorEnabledChangedId);
             this._rotatorEnabledChangedId = null;
         }
+        if (this._wallpaperSourceChangedId) {
+            this._settings.disconnect(this._wallpaperSourceChangedId);
+            this._wallpaperSourceChangedId = null;
+        }
         if (this._bgChangedId) {
             this._bgSettings.disconnect(this._bgChangedId);
             this._bgChangedId = null;
@@ -278,32 +394,49 @@ class WchangerIndicator extends PanelMenu.Button {
             this._bgSettings.disconnect(this._bgDarkChangedId);
             this._bgDarkChangedId = null;
         }
+        this._bgSettings = null;
+        this._settings = null;
         super.destroy();
     }
 
     _syncCurrentBackground() {
-        let uri = this._bgSettings.get_string('picture-uri');
-        if (!uri) {
-            uri = this._bgSettings.get_string('picture-uri-dark');
+        try {
+            let uri = this._bgSettings ? this._bgSettings.get_string('picture-uri') : '';
+            if (!uri && this._bgSettings) {
+                uri = this._bgSettings.get_string('picture-uri-dark');
+            }
+            if (uri) {
+                let path = uri.startsWith('file://') ? uri.replace('file://', '') : uri;
+                try {
+                    path = decodeURIComponent(path);
+                } catch (e) {
+                    // Fallback to raw string if malformed URI encoding
+                }
+                this._historyManager.recordWallpaper(path);
+            }
+            this._updateNavButtons();
+        } catch (e) {
+            logError(e, '[wchanger-extension] Error syncing background');
         }
-        if (uri) {
-            let path = uri.startsWith('file://') ? decodeURIComponent(uri.replace('file://', '')) : uri;
-            this._historyManager.recordWallpaper(path);
-        }
-        this._updateNavButtons();
     }
 
     _applyWallpaper(filePath) {
         if (!filePath) return;
-        const file = Gio.File.new_for_path(filePath);
-        if (!file.query_exists(null)) {
-            Main.notify('Anahita Wallpaper Changer', _('Wallpaper file not found: ') + filePath);
-            return;
+        try {
+            const file = Gio.File.new_for_path(filePath);
+            if (!file.query_exists(null)) {
+                Main.notify('Anahita Wallpaper Changer', _('Wallpaper file not found: ') + filePath);
+                return;
+            }
+            const fileUri = file.get_uri();
+            if (this._bgSettings) {
+                this._bgSettings.set_string('picture-uri', fileUri);
+                this._bgSettings.set_string('picture-uri-dark', fileUri);
+            }
+            this._updateNavButtons();
+        } catch (e) {
+            logError(e, `[wchanger-extension] Failed to apply wallpaper: ${filePath}`);
         }
-        const fileUri = file.get_uri();
-        this._bgSettings.set_string('picture-uri', fileUri);
-        this._bgSettings.set_string('picture-uri-dark', fileUri);
-        this._updateNavButtons();
     }
 
     _buildMenu() {
@@ -336,7 +469,60 @@ class WchangerIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Section 2: Online Sources Submenu
+        // Section 2: Local Photos
+        const localSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Local Photos'), true);
+        if (localSubMenu.icon) {
+            localSubMenu.icon.icon_name = 'folder-pictures-symbolic';
+        }
+
+        const rotateLocalItem = new PopupMenu.PopupImageMenuItem(_('Rotate Local Photo'), 'media-playlist-shuffle-symbolic');
+        rotateLocalItem.connect('activate', () => {
+            this._applyRandomLocalPhoto();
+        });
+        localSubMenu.menu.addMenuItem(rotateLocalItem);
+
+        const isLocalActive = this._settings.get_string('wallpaper-source') === 'local';
+        this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(_('Use as Active Source'), isLocalActive);
+        this._useLocalSourceSwitch.connect('toggled', (item, state) => {
+            this._settings.set_string('wallpaper-source', state ? 'local' : 'online');
+        });
+        localSubMenu.menu.addMenuItem(this._useLocalSourceSwitch);
+
+        const openLocalDirItem = new PopupMenu.PopupImageMenuItem(_('Open Photos Folder'), 'folder-open-symbolic');
+        openLocalDirItem.connect('activate', () => {
+            const localDir = this._getLocalPhotosDirectory();
+            runCommandAsync(['xdg-open', localDir]);
+        });
+        localSubMenu.menu.addMenuItem(openLocalDirItem);
+
+        this._localPhotoCountLabel = new PopupMenu.PopupMenuItem('', { reactive: false });
+        localSubMenu.menu.addMenuItem(this._localPhotoCountLabel);
+
+        // Update photo count and switch state when submenu opens
+        localSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen) {
+                const localDir = this._getLocalPhotosDirectory();
+                const recursive = this._settings.get_boolean('recursive-scan');
+                const photos = getLocalPhotos(localDir, recursive);
+                const countText = photos.length > 0
+                    ? `${photos.length} ${_('photos found')}`
+                    : _('No photos found');
+                const homeDir = GLib.get_home_dir();
+                const displayDir = localDir.startsWith(homeDir)
+                    ? `~${localDir.substring(homeDir.length)}`
+                    : localDir;
+                this._localPhotoCountLabel.label.set_text(`${displayDir} (${countText})`);
+
+                const isLocal = this._settings.get_string('wallpaper-source') === 'local';
+                if (this._useLocalSourceSwitch.state !== isLocal) {
+                    this._useLocalSourceSwitch.setToggleState(isLocal);
+                }
+            }
+        });
+
+        this.menu.addMenuItem(localSubMenu);
+
+        // Section 3: Online Sources Submenu
         const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Online Providers'), true);
         if (sourcesSubMenu.icon) {
             sourcesSubMenu.icon.icon_name = 'applications-internet-symbolic';
@@ -351,6 +537,8 @@ class WchangerIndicator extends PanelMenu.Button {
         providers.forEach(p => {
             const item = new PopupMenu.PopupImageMenuItem(p.label, p.icon);
             item.connect('activate', () => {
+                this._settings.set_string('wallpaper-source', 'online');
+                this._settings.set_string('default-provider', p.key);
                 const multiMon = this._settings.get_boolean('enable-multi-monitor');
                 const args = ['--online', p.key, '--no-repetition'];
                 if (multiMon) args.push('-m');
@@ -452,6 +640,12 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _triggerWchangerRotation() {
+        const source = this._settings.get_string('wallpaper-source');
+        if (source === 'local') {
+            this._applyRandomLocalPhoto();
+            return;
+        }
+
         const multiMon = this._settings.get_boolean('enable-multi-monitor');
         const args = ['--no-repetition'];
         if (multiMon) {
@@ -490,6 +684,9 @@ class WchangerIndicator extends PanelMenu.Button {
             const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
             customPath = `${pics}/Wallpapers/Favorites`;
         }
+        if (customPath.startsWith('~')) {
+            customPath = `${GLib.get_home_dir()}${customPath.substring(1)}`;
+        }
         const dir = Gio.File.new_for_path(customPath);
         if (!dir.query_exists(null)) {
             try {
@@ -499,6 +696,53 @@ class WchangerIndicator extends PanelMenu.Button {
             }
         }
         return customPath;
+    }
+
+    _getLocalPhotosDirectory() {
+        let customPath = this._settings.get_string('wallpapers-directory');
+        if (!customPath || customPath.trim().length === 0) {
+            const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
+            customPath = `${pics}/Wallpapers`;
+        }
+        // Expand ~ if present
+        if (customPath.startsWith('~')) {
+            customPath = `${GLib.get_home_dir()}${customPath.substring(1)}`;
+        }
+        const dir = Gio.File.new_for_path(customPath);
+        if (!dir.query_exists(null)) {
+            try {
+                dir.make_directory_with_parents(null);
+            } catch (e) {
+                // Ignore
+            }
+        }
+        return customPath;
+    }
+
+    _applyRandomLocalPhoto() {
+        const localDir = this._getLocalPhotosDirectory();
+        const recursive = this._settings.get_boolean('recursive-scan');
+        const photos = getLocalPhotos(localDir, recursive, true);
+
+        if (photos.length === 0) {
+            Main.notify(
+                'Anahita Wallpaper Changer',
+                _('No photos found in local folder: ') + localDir
+            );
+            return;
+        }
+
+        // Pick a random photo, avoiding the current wallpaper if possible
+        const currentPath = this._historyManager.getCurrent();
+        let candidates = photos;
+        if (photos.length > 1 && currentPath) {
+            candidates = photos.filter(p => p !== currentPath);
+            if (candidates.length === 0) candidates = photos;
+        }
+
+        const randomIndex = Math.floor(Math.random() * candidates.length);
+        const chosen = candidates[randomIndex];
+        this._applyWallpaper(chosen);
     }
 
     _favoriteCurrentWallpaper() {

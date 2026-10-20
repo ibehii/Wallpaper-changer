@@ -3494,6 +3494,85 @@ class TestWallpaperChanger(unittest.TestCase):
                     wchanger.download_online_wallpaper("https://example.com/broken.jpg", dest, max_retries=1)
         self.assertFalse(dest.exists())
 
+    def test_get_prefetch_candidate_found_and_missing(self) -> None:
+        """get_prefetch_candidate should detect valid prefetched files and ignore invalid/missing ones."""
+        # Missing
+        self.assertIsNone(wchanger.get_prefetch_candidate(self.test_dir, "wallhaven"))
+
+        # Valid JPEG
+        valid_prefetch = self.test_dir / "prefetch_wallhaven.jpg"
+        valid_prefetch.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+        candidate = wchanger.get_prefetch_candidate(self.test_dir, "wallhaven")
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate, valid_prefetch)
+
+        # Monitor specific
+        self.assertIsNone(wchanger.get_prefetch_candidate(self.test_dir, "wallhaven", monitor_index=1))
+        m1_prefetch = self.test_dir / "prefetch_wallhaven_m1.png"
+        m1_prefetch.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+        candidate_m1 = wchanger.get_prefetch_candidate(self.test_dir, "wallhaven", monitor_index=1)
+        self.assertIsNotNone(candidate_m1)
+        self.assertEqual(candidate_m1, m1_prefetch)
+
+    @patch.dict(wchanger.ONLINE_PROVIDERS, {"wallhaven": MagicMock(return_value="https://w.wallhaven.cc/full/123.jpg")})
+    @patch("wchanger.download_online_wallpaper")
+    def test_prefetch_online_wallpaper_creates_file(
+        self, mock_download: MagicMock
+    ) -> None:
+        """prefetch_online_wallpaper should fetch URL and download to prefetch cache file."""
+        def fake_download(url: str, dest: Path) -> Path:
+            dest.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+            return dest
+
+        mock_download.side_effect = fake_download
+        results = wchanger.prefetch_online_wallpaper("wallhaven", cache_dir=self.test_dir)
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0].exists())
+        self.assertTrue(results[0].name.startswith("prefetch_wallhaven"))
+
+    @patch("wchanger.spawn_background_prefetch")
+    @patch("wchanger.download_online_wallpaper")
+    @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "Success"))
+    def test_run_online_wallpaper_cycle_uses_prefetched_image(
+        self,
+        mock_set: MagicMock,
+        mock_download: MagicMock,
+        mock_spawn_prefetch: MagicMock,
+    ) -> None:
+        """run_online_wallpaper_cycle should instantly promote and apply prefetched image without network download."""
+        prefetched_file = self.test_dir / "prefetch_bing.jpg"
+        prefetched_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+
+        with self.assertRaises(SystemExit) as exc:
+            wchanger.run_online_wallpaper_cycle(
+                desktop_environment="gnome",
+                provider="bing",
+                pause_seconds=1,
+                repetition=False,
+                output_mode="console",
+                cache_dir=self.test_dir,
+                prefetch=True,
+            )
+
+        self.assertEqual(exc.exception.code, 0)
+        # Should NOT download since prefetch was consumed
+        mock_download.assert_not_called()
+        # Should set wallpaper using promoted file
+        mock_set.assert_called_once()
+        applied_path = mock_set.call_args.kwargs["wallpaper_path"]
+        self.assertTrue(str(applied_path).startswith(str(self.test_dir)))
+        self.assertIn("wallpaper_bing_", str(applied_path))
+        # Should spawn next prefetch in background
+        mock_spawn_prefetch.assert_called_once()
+
+    @patch("wchanger.prefetch_online_wallpaper")
+    def test_cli_prefetch_only_dispatch(self, mock_prefetch: MagicMock) -> None:
+        """cli with --prefetch-only should run prefetch_online_wallpaper and exit 0."""
+        runner = CliRunner()
+        result = runner.invoke(wchanger.cli, ["--online", "wallhaven", "--prefetch-only"])
+        self.assertEqual(result.exit_code, 0)
+        mock_prefetch.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

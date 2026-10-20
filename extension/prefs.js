@@ -4,6 +4,61 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+function openFolderChooser(window, title, currentPath, onSelected) {
+    try {
+        if (Gtk.FileDialog) {
+            const dialog = new Gtk.FileDialog({ title });
+            if (currentPath) {
+                let expandedPath = currentPath;
+                if (expandedPath.startsWith('~')) {
+                    expandedPath = `${GLib.get_home_dir()}${expandedPath.substring(1)}`;
+                }
+                try {
+                    const initialFile = Gio.File.new_for_path(expandedPath);
+                    if (initialFile.query_exists(null)) {
+                        dialog.set_initial_folder(initialFile);
+                    }
+                } catch (e) {
+                    // Ignore initial folder resolution error
+                }
+            }
+            dialog.select_folder(window, null, (dlg, res) => {
+                try {
+                    const folder = dlg.select_folder_finish(res);
+                    if (folder) {
+                        onSelected(folder.get_path());
+                    }
+                } catch (e) {
+                    // User cancelled or dismissed dialog
+                }
+            });
+        } else if (Gtk.FileChooserNative) {
+            const chooser = new Gtk.FileChooserNative({
+                title,
+                transient_for: window,
+                action: Gtk.FileChooserAction.SELECT_FOLDER,
+                accept_label: _('Select'),
+                cancel_label: _('Cancel'),
+            });
+            chooser.connect('response', (dlg, response) => {
+                try {
+                    if (response === Gtk.ResponseType.ACCEPT) {
+                        const chosen = dlg.get_file();
+                        if (chosen) {
+                            onSelected(chosen.get_path());
+                        }
+                    }
+                } finally {
+                    chooser.destroy();
+                }
+            });
+            chooser.show();
+        }
+    } catch (err) {
+        logError(err, '[wchanger-prefs] Error opening folder chooser');
+    }
+}
+
 export default class WchangerPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings('org.gnome.shell.extensions.wchanger');
@@ -54,9 +109,90 @@ export default class WchangerPreferences extends ExtensionPreferences {
             const raw = entry.get_text().trim();
             settings.set_string('favorites-directory', raw.length > 0 ? raw : defaultFavDir);
         });
+
+        const browseFavsBtn = new Gtk.Button({
+            icon_name: 'folder-open-symbolic',
+            valign: Gtk.Align.CENTER,
+            has_frame: false,
+            tooltip_text: _('Browse for folder'),
+        });
+        browseFavsBtn.connect('clicked', () => {
+            openFolderChooser(window, _('Select Favorites Folder'), settings.get_string('favorites-directory') || defaultFavDir, (chosenPath) => {
+                favoritesPathRow.set_text(chosenPath);
+                settings.set_string('favorites-directory', chosenPath);
+            });
+        });
+        favoritesPathRow.add_suffix(browseFavsBtn);
         favoritesGroup.add(favoritesPathRow);
 
-        // Group 3: Online Providers
+        // Group 3: Local Photos
+        const localPhotosGroup = new Adw.PreferencesGroup({
+            title: _('Local Photos'),
+            description: _('Rotate wallpapers from a folder on your computer.'),
+        });
+        page.add(localPhotosGroup);
+
+        const defaultWallDir = `${GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || GLib.get_home_dir() + '/Pictures'}/Wallpapers`;
+        const currentWallDir = settings.get_string('wallpapers-directory') || defaultWallDir;
+
+        const wallpapersPathRow = new Adw.EntryRow({
+            title: _('Local Photos Folder'),
+            text: currentWallDir,
+            show_apply_button: true,
+        });
+        wallpapersPathRow.connect('apply', (entry) => {
+            const raw = entry.get_text().trim();
+            settings.set_string('wallpapers-directory', raw.length > 0 ? raw : defaultWallDir);
+        });
+
+        const browseWallpapersBtn = new Gtk.Button({
+            icon_name: 'folder-open-symbolic',
+            valign: Gtk.Align.CENTER,
+            has_frame: false,
+            tooltip_text: _('Browse for folder'),
+        });
+        browseWallpapersBtn.connect('clicked', () => {
+            openFolderChooser(window, _('Select Local Photos Folder'), settings.get_string('wallpapers-directory') || defaultWallDir, (chosenPath) => {
+                wallpapersPathRow.set_text(chosenPath);
+                settings.set_string('wallpapers-directory', chosenPath);
+            });
+        });
+        wallpapersPathRow.add_suffix(browseWallpapersBtn);
+        localPhotosGroup.add(wallpapersPathRow);
+
+        // Wallpaper Source selector (local vs online)
+        const sourceChoices = ['local', 'online'];
+        const sourceNames = [_('Local Folder'), _('Online Provider')];
+        const sourceStringList = Gtk.StringList.new(sourceNames);
+
+        const currentSource = settings.get_string('wallpaper-source') || 'local';
+        let currentSourceIndex = sourceChoices.indexOf(currentSource);
+        if (currentSourceIndex < 0) {
+            currentSourceIndex = 0;
+        }
+
+        const sourceRow = new Adw.ComboRow({
+            title: _('Wallpaper Source'),
+            subtitle: _('Choose whether the Background Rotator uses local photos or an online provider.'),
+            model: sourceStringList,
+            selected: currentSourceIndex,
+        });
+        sourceRow.connect('notify::selected', (widget) => {
+            const selectedIdx = widget.selected;
+            if (selectedIdx >= 0 && selectedIdx < sourceChoices.length) {
+                settings.set_string('wallpaper-source', sourceChoices[selectedIdx]);
+            }
+        });
+        localPhotosGroup.add(sourceRow);
+
+        const recursiveRow = new Adw.SwitchRow({
+            title: _('Scan Subfolders'),
+            subtitle: _('Search for images recursively in subdirectories of the local photos folder.'),
+        });
+        settings.bind('recursive-scan', recursiveRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        localPhotosGroup.add(recursiveRow);
+
+        // Group 4: Online Providers
         const onlineGroup = new Adw.PreferencesGroup({
             title: _('Online Source'),
             description: _('Default provider when rotating online images.'),
@@ -87,7 +223,7 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         onlineGroup.add(providerRow);
 
-        // Group 4: Automatic Background Rotator
+        // Group 5: Automatic Background Rotator
         const rotatorGroup = new Adw.PreferencesGroup({
             title: _('Background Rotator'),
             description: _('Configure periodic automatic wallpaper changes.'),
@@ -122,7 +258,7 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         rotatorGroup.add(intervalRow);
 
-        // Group 5: Advanced & Execution Paths
+        // Group 6: Advanced & Execution Paths
         const advancedGroup = new Adw.PreferencesGroup({
             title: _('Advanced'),
             description: _('Executable resolution and custom CLI overrides.'),

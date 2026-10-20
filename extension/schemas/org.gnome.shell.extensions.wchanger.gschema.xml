@@ -36,5 +36,25 @@
       <summary>Custom wchanger executable path</summary>
       <description>Optional custom absolute path to the wchanger executable.</description>
     </key>
+    <key name="wallpapers-directory" type="s">
+      <default>""</default>
+      <summary>Local wallpapers directory path</summary>
+      <description>Directory path containing local wallpapers. Defaults to ~/Pictures/Wallpapers if empty.</description>
+    </key>
+    <key name="wallpaper-source" type="s">
+      <default>"local"</default>
+      <summary>Default wallpaper source</summary>
+      <description>Primary wallpaper source to rotate from: 'local' folder or 'online' provider.</description>
+    </key>
+    <key name="enable-prefetch" type="b">
+      <default>true</default>
+      <summary>Enable online prefetching</summary>
+      <description>Whether to pre-download the next online wallpaper in the background for zero-latency switching.</description>
+    </key>
+    <key name="recursive-scan" type="b">
+      <default>true</default>
+      <summary>Scan local wallpaper subdirectories recursively</summary>
+      <description>Whether to search for images recursively in subfolders of the local wallpapers directory.</description>
+    </key>
   </schema>
 </schemalist>
