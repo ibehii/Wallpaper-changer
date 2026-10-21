@@ -1677,6 +1677,35 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertIn("check your internet connection", error_message)
         self.assertIn("wallhaven", error_message)
 
+    def test_format_network_error_rate_limit_429(self) -> None:
+        """format_network_error should format HTTP 429 with rate limit advice."""
+        from urllib.error import HTTPError
+        error = HTTPError("https://wallhaven.cc/api/v1/search", 429, "Too Many Requests", {}, None)
+        error_message = wchanger.format_network_error("wallhaven", error)
+        self.assertIn("Rate limit exceeded", error_message)
+        self.assertIn("HTTP 429", error_message)
+        self.assertIn("wallhaven", error_message)
+
+    @patch("wchanger.time.sleep")
+    @patch("wchanger.urlopen")
+    def test_fetch_url_with_retry_429_success(
+        self, mock_urlopen: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """_fetch_url_with_retry should retry on HTTP 429 and succeed on retry."""
+        from urllib.error import HTTPError
+        from urllib.request import Request
+        headers = {"Retry-After": "1.5"}
+        error_429 = HTTPError("https://example.com", 429, "Too Many Requests", headers, None)
+        fake_response = MagicMock()
+        fake_response.read.return_value = b"OK_AFTER_RETRY"
+        fake_response.__enter__.return_value = fake_response
+
+        mock_urlopen.side_effect = [error_429, fake_response]
+        req = Request("https://example.com")
+        res = wchanger._fetch_url_with_retry(req, max_retries=2, retry_delay_seconds=0.1)
+        self.assertEqual(res, b"OK_AFTER_RETRY")
+        mock_sleep.assert_called_with(1.5)
+
     @patch("wchanger.set_gnome_background", return_value=True)
     @patch("wchanger.set_cinnamon_background", return_value=True)
     @patch("wchanger.set_kde_background", return_value=True)
@@ -3645,6 +3674,36 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_cycle.assert_called_once()
         self.assertEqual(mock_cycle.call_args.kwargs.get("provider"), "wallhaven")
         self.assertEqual(mock_cycle.call_args.kwargs.get("category"), "nature")
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_category_warning_for_other_provider(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI should notify user if --category is passed with a provider other than wallhaven."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "--online", "bing", "-C", "nature", "--no-repetition", "--no-config"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("The --category option applies only to 'wallhaven' and will be ignored for 'bing'", result.output)
+
+    @patch("wchanger.run_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_category_warning_for_local_folder(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI should notify user if --category is passed in local folder mode."""
+        img = self.test_dir / "wallpaper.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00")
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "--source", "folder", "-C", "nature", "--no-repetition", "--no-config", str(self.test_dir)],
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("The --category option applies only to 'wallhaven' and will be ignored for 'local folder mode'", result.output)
 
 
 if __name__ == "__main__":

@@ -37,8 +37,8 @@ function openFolderChooser(window, title, currentPath, onSelected) {
                 title,
                 transient_for: window,
                 action: Gtk.FileChooserAction.SELECT_FOLDER,
-                accept_label: _('Select'),
-                cancel_label: _('Cancel'),
+                accept_label: (typeof _ === 'function') ? _('Select') : 'Select',
+                cancel_label: (typeof _ === 'function') ? _('Cancel') : 'Cancel',
             });
             chooser.connect('response', (dlg, response) => {
                 try {
@@ -61,7 +61,18 @@ function openFolderChooser(window, title, currentPath, onSelected) {
 
 export default class WchangerPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
+        try {
+            this.initTranslations();
+        } catch (e) {}
+
         const settings = this.getSettings('org.gnome.shell.extensions.wchanger');
+        const hasKey = (key) => {
+            try {
+                return Boolean(settings?.settings_schema?.has_key(key));
+            } catch (e) {
+                return false;
+            }
+        };
 
         const page = new Adw.PreferencesPage({
             title: _('General'),
@@ -76,19 +87,23 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         page.add(appearanceGroup);
 
-        const showIndicatorRow = new Adw.SwitchRow({
-            title: _('Show Indicator in Top Bar'),
-            subtitle: _('Toggle visibility of the wallpaper rotator menu icon in the panel.'),
-        });
-        settings.bind('show-indicator', showIndicatorRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        appearanceGroup.add(showIndicatorRow);
+        if (hasKey('show-indicator')) {
+            const showIndicatorRow = new Adw.SwitchRow({
+                title: _('Show Indicator in Top Bar'),
+                subtitle: _('Toggle visibility of the wallpaper rotator menu icon in the panel.'),
+            });
+            settings.bind('show-indicator', showIndicatorRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+            appearanceGroup.add(showIndicatorRow);
+        }
 
-        const multiMonitorRow = new Adw.SwitchRow({
-            title: _('Multi-Monitor Spanning'),
-            subtitle: _('Pass -m to wchanger to assign different wallpapers across monitors.'),
-        });
-        settings.bind('enable-multi-monitor', multiMonitorRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        appearanceGroup.add(multiMonitorRow);
+        if (hasKey('enable-multi-monitor')) {
+            const multiMonitorRow = new Adw.SwitchRow({
+                title: _('Multi-Monitor Spanning'),
+                subtitle: _('Pass -m to wchanger to assign different wallpapers across monitors.'),
+            });
+            settings.bind('enable-multi-monitor', multiMonitorRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+            appearanceGroup.add(multiMonitorRow);
+        }
 
         // Group 2: Favorites Storage
         const favoritesGroup = new Adw.PreferencesGroup({
@@ -98,7 +113,7 @@ export default class WchangerPreferences extends ExtensionPreferences {
         page.add(favoritesGroup);
 
         const defaultFavDir = `${GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || GLib.get_home_dir() + '/Pictures'}/Wallpapers/Favorites`;
-        const currentFavDir = settings.get_string('favorites-directory') || defaultFavDir;
+        const currentFavDir = (hasKey('favorites-directory') ? settings.get_string('favorites-directory') : '') || defaultFavDir;
 
         const favoritesPathRow = new Adw.EntryRow({
             title: _('Favorites Folder Path'),
@@ -107,7 +122,9 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         favoritesPathRow.connect('apply', (entry) => {
             const raw = entry.get_text().trim();
-            settings.set_string('favorites-directory', raw.length > 0 ? raw : defaultFavDir);
+            if (hasKey('favorites-directory')) {
+                settings.set_string('favorites-directory', raw.length > 0 ? raw : defaultFavDir);
+            }
         });
 
         const browseFavsBtn = new Gtk.Button({
@@ -117,9 +134,12 @@ export default class WchangerPreferences extends ExtensionPreferences {
             tooltip_text: _('Browse for folder'),
         });
         browseFavsBtn.connect('clicked', () => {
-            openFolderChooser(window, _('Select Favorites Folder'), settings.get_string('favorites-directory') || defaultFavDir, (chosenPath) => {
+            const cur = (hasKey('favorites-directory') ? settings.get_string('favorites-directory') : '') || defaultFavDir;
+            openFolderChooser(window, _('Select Favorites Folder'), cur, (chosenPath) => {
                 favoritesPathRow.set_text(chosenPath);
-                settings.set_string('favorites-directory', chosenPath);
+                if (hasKey('favorites-directory')) {
+                    settings.set_string('favorites-directory', chosenPath);
+                }
             });
         });
         favoritesPathRow.add_suffix(browseFavsBtn);
@@ -133,7 +153,7 @@ export default class WchangerPreferences extends ExtensionPreferences {
         page.add(localPhotosGroup);
 
         const defaultWallDir = `${GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || GLib.get_home_dir() + '/Pictures'}/Wallpapers`;
-        const currentWallDir = settings.get_string('wallpapers-directory') || defaultWallDir;
+        const currentWallDir = (hasKey('wallpapers-directory') ? settings.get_string('wallpapers-directory') : '') || defaultWallDir;
 
         const wallpapersPathRow = new Adw.EntryRow({
             title: _('Local Photos Folder'),
@@ -142,7 +162,9 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         wallpapersPathRow.connect('apply', (entry) => {
             const raw = entry.get_text().trim();
-            settings.set_string('wallpapers-directory', raw.length > 0 ? raw : defaultWallDir);
+            if (hasKey('wallpapers-directory')) {
+                settings.set_string('wallpapers-directory', raw.length > 0 ? raw : defaultWallDir);
+            }
         });
 
         const browseWallpapersBtn = new Gtk.Button({
@@ -152,45 +174,52 @@ export default class WchangerPreferences extends ExtensionPreferences {
             tooltip_text: _('Browse for folder'),
         });
         browseWallpapersBtn.connect('clicked', () => {
-            openFolderChooser(window, _('Select Local Photos Folder'), settings.get_string('wallpapers-directory') || defaultWallDir, (chosenPath) => {
+            const cur = (hasKey('wallpapers-directory') ? settings.get_string('wallpapers-directory') : '') || defaultWallDir;
+            openFolderChooser(window, _('Select Local Photos Folder'), cur, (chosenPath) => {
                 wallpapersPathRow.set_text(chosenPath);
-                settings.set_string('wallpapers-directory', chosenPath);
+                if (hasKey('wallpapers-directory')) {
+                    settings.set_string('wallpapers-directory', chosenPath);
+                }
             });
         });
         wallpapersPathRow.add_suffix(browseWallpapersBtn);
         localPhotosGroup.add(wallpapersPathRow);
 
         // Wallpaper Source selector (local vs online)
-        const sourceChoices = ['local', 'online'];
-        const sourceNames = [_('Local Folder'), _('Online Provider')];
-        const sourceStringList = Gtk.StringList.new(sourceNames);
+        if (hasKey('wallpaper-source')) {
+            const sourceChoices = ['local', 'online'];
+            const sourceNames = [_('Local Folder'), _('Online Provider')];
+            const sourceStringList = Gtk.StringList.new(sourceNames);
 
-        const currentSource = settings.get_string('wallpaper-source') || 'local';
-        let currentSourceIndex = sourceChoices.indexOf(currentSource);
-        if (currentSourceIndex < 0) {
-            currentSourceIndex = 0;
+            const currentSource = settings.get_string('wallpaper-source') || 'local';
+            let currentSourceIndex = sourceChoices.indexOf(currentSource);
+            if (currentSourceIndex < 0) {
+                currentSourceIndex = 0;
+            }
+
+            const sourceRow = new Adw.ComboRow({
+                title: _('Wallpaper Source'),
+                subtitle: _('Choose whether the Background Rotator uses local photos or an online provider.'),
+                model: sourceStringList,
+                selected: currentSourceIndex,
+            });
+            sourceRow.connect('notify::selected', (widget) => {
+                const selectedIdx = widget.selected;
+                if (selectedIdx >= 0 && selectedIdx < sourceChoices.length) {
+                    settings.set_string('wallpaper-source', sourceChoices[selectedIdx]);
+                }
+            });
+            localPhotosGroup.add(sourceRow);
         }
 
-        const sourceRow = new Adw.ComboRow({
-            title: _('Wallpaper Source'),
-            subtitle: _('Choose whether the Background Rotator uses local photos or an online provider.'),
-            model: sourceStringList,
-            selected: currentSourceIndex,
-        });
-        sourceRow.connect('notify::selected', (widget) => {
-            const selectedIdx = widget.selected;
-            if (selectedIdx >= 0 && selectedIdx < sourceChoices.length) {
-                settings.set_string('wallpaper-source', sourceChoices[selectedIdx]);
-            }
-        });
-        localPhotosGroup.add(sourceRow);
-
-        const recursiveRow = new Adw.SwitchRow({
-            title: _('Scan Subfolders'),
-            subtitle: _('Search for images recursively in subdirectories of the local photos folder.'),
-        });
-        settings.bind('recursive-scan', recursiveRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        localPhotosGroup.add(recursiveRow);
+        if (hasKey('recursive-scan')) {
+            const recursiveRow = new Adw.SwitchRow({
+                title: _('Scan Subfolders'),
+                subtitle: _('Search for images recursively in subdirectories of the local photos folder.'),
+            });
+            settings.bind('recursive-scan', recursiveRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+            localPhotosGroup.add(recursiveRow);
+        }
 
         // Group 4: Online Providers
         const onlineGroup = new Adw.PreferencesGroup({
@@ -203,7 +232,7 @@ export default class WchangerPreferences extends ExtensionPreferences {
         const providerNames = [_('Wallhaven'), _('Bing Daily Photo'), _('Lorem Picsum (Random)'), _('LoremFlickr (Nature)')];
         const stringList = Gtk.StringList.new(providerNames);
 
-        const currentProvider = settings.get_string('default-provider') || 'wallhaven';
+        const currentProvider = (hasKey('default-provider') ? settings.get_string('default-provider') : '') || 'wallhaven';
         let currentIndex = providers.indexOf(currentProvider);
         if (currentIndex < 0) {
             currentIndex = 0;
@@ -232,68 +261,73 @@ export default class WchangerPreferences extends ExtensionPreferences {
         const catNames = wallhavenCategories.map(c => c.name);
         const catStringList = Gtk.StringList.new(catNames);
 
-        const currentCategory = settings.get_string('wallhaven-category') || 'nature';
-        let currentCatIndex = wallhavenCategories.findIndex(c => c.id === currentCategory);
-        if (currentCatIndex < 0) {
-            currentCatIndex = 0;
-        }
+        let categoryRow = null;
+        let customCatRow = null;
 
-        const categoryRow = new Adw.ComboRow({
-            title: _('Wallhaven Category'),
-            subtitle: _('Select image category or theme when Wallhaven is used.'),
-            model: catStringList,
-            selected: currentCatIndex,
-        });
-
-        const customCatRow = new Adw.EntryRow({
-            title: _('Custom Wallhaven Tag / Keyword'),
-            text: currentCategory,
-            show_apply_button: true,
-        });
-
-        let updatingCategory = false;
-        categoryRow.connect('notify::selected', (widget) => {
-            if (updatingCategory) return;
-            const selectedIdx = widget.selected;
-            if (selectedIdx >= 0 && selectedIdx < wallhavenCategories.length) {
-                const chosenCat = wallhavenCategories[selectedIdx].id;
-                updatingCategory = true;
-                settings.set_string('wallhaven-category', chosenCat);
-                customCatRow.set_text(chosenCat);
-                updatingCategory = false;
+        if (hasKey('wallhaven-category')) {
+            const currentCategory = settings.get_string('wallhaven-category') || 'nature';
+            let currentCatIndex = wallhavenCategories.findIndex(c => c.id === currentCategory);
+            if (currentCatIndex < 0) {
+                currentCatIndex = 0;
             }
-        });
 
-        customCatRow.connect('apply', (entry) => {
-            if (updatingCategory) return;
-            const val = entry.get_text().trim().toLowerCase();
-            if (val.length > 0) {
+            categoryRow = new Adw.ComboRow({
+                title: _('Wallhaven Category'),
+                subtitle: _('Select image category or theme when Wallhaven is used.'),
+                model: catStringList,
+                selected: currentCatIndex,
+            });
+
+            customCatRow = new Adw.EntryRow({
+                title: _('Custom Wallhaven Tag / Keyword'),
+                text: currentCategory,
+                show_apply_button: true,
+            });
+
+            let updatingCategory = false;
+            categoryRow.connect('notify::selected', (widget) => {
+                if (updatingCategory) return;
+                const selectedIdx = widget.selected;
+                if (selectedIdx >= 0 && selectedIdx < wallhavenCategories.length) {
+                    const chosenCat = wallhavenCategories[selectedIdx].id;
+                    updatingCategory = true;
+                    settings.set_string('wallhaven-category', chosenCat);
+                    customCatRow.set_text(chosenCat);
+                    updatingCategory = false;
+                }
+            });
+
+            customCatRow.connect('apply', (entry) => {
+                if (updatingCategory) return;
+                const val = entry.get_text().trim().toLowerCase();
+                if (val.length > 0) {
+                    updatingCategory = true;
+                    settings.set_string('wallhaven-category', val);
+                    const idx = wallhavenCategories.findIndex(c => c.id === val);
+                    if (idx >= 0) {
+                        categoryRow.set_selected(idx);
+                    }
+                    updatingCategory = false;
+                }
+            });
+
+            settings.connect('changed::wallhaven-category', () => {
+                if (updatingCategory) return;
                 updatingCategory = true;
-                settings.set_string('wallhaven-category', val);
-                const idx = wallhavenCategories.findIndex(c => c.id === val);
+                const newCat = settings.get_string('wallhaven-category') || 'nature';
+                customCatRow.set_text(newCat);
+                const idx = wallhavenCategories.findIndex(c => c.id === newCat);
                 if (idx >= 0) {
                     categoryRow.set_selected(idx);
                 }
                 updatingCategory = false;
-            }
-        });
-
-        settings.connect('changed::wallhaven-category', () => {
-            if (updatingCategory) return;
-            updatingCategory = true;
-            const newCat = settings.get_string('wallhaven-category') || 'nature';
-            customCatRow.set_text(newCat);
-            const idx = wallhavenCategories.findIndex(c => c.id === newCat);
-            if (idx >= 0) {
-                categoryRow.set_selected(idx);
-            }
-            updatingCategory = false;
-        });
+            });
+        }
 
         const updateWallhavenSensitivity = (provider) => {
             const isWallhaven = (provider === 'wallhaven');
-            categoryRow.set_sensitive(isWallhaven);
-            customCatRow.set_sensitive(isWallhaven);
+            if (categoryRow) categoryRow.set_sensitive(isWallhaven);
+            if (customCatRow) customCatRow.set_sensitive(isWallhaven);
         };
         updateWallhavenSensitivity(currentProvider);
 
@@ -301,14 +335,16 @@ export default class WchangerPreferences extends ExtensionPreferences {
             const selectedIdx = widget.selected;
             if (selectedIdx >= 0 && selectedIdx < providers.length) {
                 const prov = providers[selectedIdx];
-                settings.set_string('default-provider', prov);
+                if (hasKey('default-provider')) {
+                    settings.set_string('default-provider', prov);
+                }
                 updateWallhavenSensitivity(prov);
             }
         });
 
         onlineGroup.add(providerRow);
-        onlineGroup.add(categoryRow);
-        onlineGroup.add(customCatRow);
+        if (categoryRow) onlineGroup.add(categoryRow);
+        if (customCatRow) onlineGroup.add(customCatRow);
 
         // Group 5: Automatic Background Rotator
         const rotatorGroup = new Adw.PreferencesGroup({
@@ -317,33 +353,37 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         page.add(rotatorGroup);
 
-        const rotatorEnabledRow = new Adw.SwitchRow({
-            title: _('Enable Background Rotator'),
-            subtitle: _('Rotate wallpapers automatically at the configured time interval.'),
-        });
-        settings.bind('rotator-enabled', rotatorEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        rotatorGroup.add(rotatorEnabledRow);
+        if (hasKey('rotator-enabled')) {
+            const rotatorEnabledRow = new Adw.SwitchRow({
+                title: _('Enable Background Rotator'),
+                subtitle: _('Rotate wallpapers automatically at the configured time interval.'),
+            });
+            settings.bind('rotator-enabled', rotatorEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+            rotatorGroup.add(rotatorEnabledRow);
+        }
 
-        const currentIntervalSec = settings.get_int('rotation-interval') || 300;
-        const currentIntervalMin = Math.max(1, Math.round(currentIntervalSec / 60));
-        const intervalAdjustment = new Gtk.Adjustment({
-            lower: 1,
-            upper: 1440,
-            step_increment: 1,
-            page_increment: 5,
-            value: currentIntervalMin,
-        });
+        if (hasKey('rotation-interval')) {
+            const currentIntervalSec = settings.get_int('rotation-interval') || 300;
+            const currentIntervalMin = Math.max(1, Math.round(currentIntervalSec / 60));
+            const intervalAdjustment = new Gtk.Adjustment({
+                lower: 1,
+                upper: 1440,
+                step_increment: 1,
+                page_increment: 5,
+                value: currentIntervalMin,
+            });
 
-        const intervalRow = new Adw.SpinRow({
-            title: _('Rotation Interval (minutes)'),
-            subtitle: _('Time in minutes between automatic rotations (default: 5 min).'),
-            adjustment: intervalAdjustment,
-        });
-        intervalRow.connect('notify::value', (widget) => {
-            const minutes = Math.max(1, Math.round(widget.get_value()));
-            settings.set_int('rotation-interval', minutes * 60);
-        });
-        rotatorGroup.add(intervalRow);
+            const intervalRow = new Adw.SpinRow({
+                title: _('Rotation Interval (minutes)'),
+                subtitle: _('Time in minutes between automatic rotations (default: 5 min).'),
+                adjustment: intervalAdjustment,
+            });
+            intervalRow.connect('notify::value', (widget) => {
+                const minutes = Math.max(1, Math.round(widget.get_value()));
+                settings.set_int('rotation-interval', minutes * 60);
+            });
+            rotatorGroup.add(intervalRow);
+        }
 
         // Group 6: Advanced & Execution Paths
         const advancedGroup = new Adw.PreferencesGroup({
@@ -352,16 +392,18 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         page.add(advancedGroup);
 
-        const currentCustomPath = settings.get_string('custom-wchanger-path') || '';
-        const customPathRow = new Adw.EntryRow({
-            title: _('Custom wchanger Executable Path'),
-            text: currentCustomPath,
-            show_apply_button: true,
-        });
-        customPathRow.connect('apply', (entry) => {
-            const raw = entry.get_text().trim();
-            settings.set_string('custom-wchanger-path', raw);
-        });
-        advancedGroup.add(customPathRow);
+        if (hasKey('custom-wchanger-path')) {
+            const currentCustomPath = settings.get_string('custom-wchanger-path') || '';
+            const customPathRow = new Adw.EntryRow({
+                title: _('Custom wchanger Executable Path'),
+                text: currentCustomPath,
+                show_apply_button: true,
+            });
+            customPathRow.connect('apply', (entry) => {
+                const raw = entry.get_text().trim();
+                settings.set_string('custom-wchanger-path', raw);
+            });
+            advancedGroup.add(customPathRow);
+        }
     }
 }

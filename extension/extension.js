@@ -12,19 +12,6 @@ const GNOME_BG_SCHEMA = 'org.gnome.desktop.background';
 const MAX_HISTORY_ITEMS = 50;
 const SUPPORTED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.svg', '.tiff']);
 
-const WALLHAVEN_CATEGORIES = [
-    { key: 'nature', label: _('Nature & Landscapes') },
-    { key: 'space', label: _('Space & Astronomy') },
-    { key: 'anime', label: _('Anime Artwork') },
-    { key: 'cyberpunk', label: _('Cyberpunk & Sci-Fi') },
-    { key: 'city', label: _('City & Architecture') },
-    { key: 'cars', label: _('Cars & Vehicles') },
-    { key: 'gaming', label: _('Gaming & Fantasy') },
-    { key: 'minimalism', label: _('Minimalism') },
-    { key: 'general', label: _('General Photography') },
-    { key: 'all', label: _('All (Random)') },
-];
-
 /**
  * Recursively or non-recursively enumerate image files in a directory.
  * Safely guards against circular symlinks, deep nesting, and limits file count for UI responsiveness.
@@ -329,8 +316,20 @@ class WchangerIndicator extends PanelMenu.Button {
     _init(extension) {
         super._init(0.0, 'Anahita Wallpaper Changer');
         this._extension = extension;
-        this._settings = extension.getSettings('org.gnome.shell.extensions.wchanger');
-        this._bgSettings = new Gio.Settings({ schema_id: GNOME_BG_SCHEMA });
+        try {
+            this._settings = extension.getSettings('org.gnome.shell.extensions.wchanger');
+        } catch (e) {
+            logError(e, '[wchanger-extension] Failed to load extension schema');
+            this._settings = null;
+        }
+
+        try {
+            this._bgSettings = new Gio.Settings({ schema_id: GNOME_BG_SCHEMA });
+        } catch (e) {
+            logError(e, '[wchanger-extension] Failed to load GNOME background settings');
+            this._bgSettings = null;
+        }
+
         this._historyManager = new HistoryManager();
 
         // Icon in top bar
@@ -348,38 +347,99 @@ class WchangerIndicator extends PanelMenu.Button {
         this._initRotator();
 
         // Listen for settings changes
-        this._intervalChangedId = this._settings.connect('changed::rotation-interval', () => {
-            if (this._settings.get_boolean('rotator-enabled')) {
-                this._startRotatorTimer();
-            }
-        });
+        if (this._settings) {
+            this._intervalChangedId = this._settings.connect('changed::rotation-interval', () => {
+                if (this._getBooleanSetting('rotator-enabled', false)) {
+                    this._startRotatorTimer();
+                }
+            });
 
-        this._rotatorEnabledChangedId = this._settings.connect('changed::rotator-enabled', () => {
-            const enabled = this._settings.get_boolean('rotator-enabled');
-            if (this._serviceSwitch && this._serviceSwitch.state !== enabled) {
-                this._serviceSwitch.setToggleState(enabled);
-            }
-            if (enabled) {
-                this._startRotatorTimer();
-            } else {
-                this._stopRotatorTimer();
-            }
-        });
+            this._rotatorEnabledChangedId = this._settings.connect('changed::rotator-enabled', () => {
+                const enabled = this._getBooleanSetting('rotator-enabled', false);
+                if (this._serviceSwitch && this._serviceSwitch.state !== enabled) {
+                    this._serviceSwitch.setToggleState(enabled);
+                }
+                if (enabled) {
+                    this._startRotatorTimer();
+                } else {
+                    this._stopRotatorTimer();
+                }
+            });
 
-        this._wallpaperSourceChangedId = this._settings.connect('changed::wallpaper-source', () => {
-            const isLocal = this._settings.get_string('wallpaper-source') === 'local';
-            if (this._useLocalSourceSwitch && this._useLocalSourceSwitch.state !== isLocal) {
-                this._useLocalSourceSwitch.setToggleState(isLocal);
-            }
-        });
+            this._wallpaperSourceChangedId = this._settings.connect('changed::wallpaper-source', () => {
+                const isLocal = this._getStringSetting('wallpaper-source', 'local') === 'local';
+                if (this._useLocalSourceSwitch && this._useLocalSourceSwitch.state !== isLocal) {
+                    this._useLocalSourceSwitch.setToggleState(isLocal);
+                }
+            });
+        }
 
         // Listen for external wallpaper changes to keep history in sync (both light and dark modes)
-        this._bgChangedId = this._bgSettings.connect('changed::picture-uri', () => {
-            this._syncCurrentBackground();
-        });
-        this._bgDarkChangedId = this._bgSettings.connect('changed::picture-uri-dark', () => {
-            this._syncCurrentBackground();
-        });
+        if (this._bgSettings) {
+            this._bgChangedId = this._bgSettings.connect('changed::picture-uri', () => {
+                this._syncCurrentBackground();
+            });
+            this._bgDarkChangedId = this._bgSettings.connect('changed::picture-uri-dark', () => {
+                this._syncCurrentBackground();
+            });
+        }
+    }
+
+    _gettext(str) {
+        if (this._extension && typeof this._extension.gettext === 'function') {
+            try {
+                return this._extension.gettext(str);
+            } catch (e) {}
+        }
+        if (typeof _ === 'function') {
+            try {
+                return _(str);
+            } catch (e) {}
+        }
+        return str;
+    }
+
+    _getStringSetting(key, fallback = '') {
+        try {
+            if (this._settings?.settings_schema?.has_key(key)) {
+                return this._settings.get_string(key);
+            }
+        } catch (e) {}
+        return fallback;
+    }
+
+    _setStringSetting(key, val) {
+        try {
+            if (this._settings?.settings_schema?.has_key(key)) {
+                this._settings.set_string(key, val);
+            }
+        } catch (e) {}
+    }
+
+    _getBooleanSetting(key, fallback = false) {
+        try {
+            if (this._settings?.settings_schema?.has_key(key)) {
+                return this._settings.get_boolean(key);
+            }
+        } catch (e) {}
+        return fallback;
+    }
+
+    _setBooleanSetting(key, val) {
+        try {
+            if (this._settings?.settings_schema?.has_key(key)) {
+                this._settings.set_boolean(key, Boolean(val));
+            }
+        } catch (e) {}
+    }
+
+    _getIntSetting(key, fallback = 300) {
+        try {
+            if (this._settings?.settings_schema?.has_key(key)) {
+                return this._settings.get_int(key);
+            }
+        } catch (e) {}
+        return fallback;
     }
 
     destroy() {
@@ -387,23 +447,23 @@ class WchangerIndicator extends PanelMenu.Button {
             GLib.Source.remove(this._rotatorTimerId);
             this._rotatorTimerId = null;
         }
-        if (this._intervalChangedId) {
+        if (this._intervalChangedId && this._settings) {
             this._settings.disconnect(this._intervalChangedId);
             this._intervalChangedId = null;
         }
-        if (this._rotatorEnabledChangedId) {
+        if (this._rotatorEnabledChangedId && this._settings) {
             this._settings.disconnect(this._rotatorEnabledChangedId);
             this._rotatorEnabledChangedId = null;
         }
-        if (this._wallpaperSourceChangedId) {
+        if (this._wallpaperSourceChangedId && this._settings) {
             this._settings.disconnect(this._wallpaperSourceChangedId);
             this._wallpaperSourceChangedId = null;
         }
-        if (this._bgChangedId) {
+        if (this._bgChangedId && this._bgSettings) {
             this._bgSettings.disconnect(this._bgChangedId);
             this._bgChangedId = null;
         }
-        if (this._bgDarkChangedId) {
+        if (this._bgDarkChangedId && this._bgSettings) {
             this._bgSettings.disconnect(this._bgDarkChangedId);
             this._bgDarkChangedId = null;
         }
@@ -455,7 +515,7 @@ class WchangerIndicator extends PanelMenu.Button {
 
     _buildMenu() {
         // Section 1: Navigation Controls (Previous, Next, Favorite)
-        this._prevItem = new PopupMenu.PopupImageMenuItem(_('Previous'), 'media-skip-backward-symbolic');
+        this._prevItem = new PopupMenu.PopupImageMenuItem(this._gettext('Previous'), 'media-skip-backward-symbolic');
         this._prevItem.connect('activate', () => {
             const prevWallpaper = this._historyManager.getPrevious();
             if (prevWallpaper) {
@@ -464,7 +524,7 @@ class WchangerIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(this._prevItem);
 
-        this._nextItem = new PopupMenu.PopupImageMenuItem(_('Next Wallpaper'), 'media-skip-forward-symbolic');
+        this._nextItem = new PopupMenu.PopupImageMenuItem(this._gettext('Next Wallpaper'), 'media-skip-forward-symbolic');
         this._nextItem.connect('activate', () => {
             if (this._historyManager.canGoForward()) {
                 const nextWallpaper = this._historyManager.getNext();
@@ -475,7 +535,7 @@ class WchangerIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(this._nextItem);
 
-        this._favItem = new PopupMenu.PopupImageMenuItem(_('Add to Favorites'), 'starred-symbolic');
+        this._favItem = new PopupMenu.PopupImageMenuItem(this._gettext('Add to Favorites'), 'starred-symbolic');
         this._favItem.connect('activate', () => {
             this._favoriteCurrentWallpaper();
         });
@@ -484,25 +544,25 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Section 2: Local Photos
-        const localSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Local Photos'), true);
+        const localSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Local Photos'), true);
         if (localSubMenu.icon) {
             localSubMenu.icon.icon_name = 'folder-pictures-symbolic';
         }
 
-        const rotateLocalItem = new PopupMenu.PopupImageMenuItem(_('Rotate Local Photo'), 'media-playlist-shuffle-symbolic');
+        const rotateLocalItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Local Photo'), 'media-playlist-shuffle-symbolic');
         rotateLocalItem.connect('activate', () => {
             this._applyRandomLocalPhoto();
         });
         localSubMenu.menu.addMenuItem(rotateLocalItem);
 
-        const isLocalActive = this._settings.get_string('wallpaper-source') === 'local';
-        this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(_('Use as Active Source'), isLocalActive);
+        const isLocalActive = this._getStringSetting('wallpaper-source', 'local') === 'local';
+        this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Use as Active Source'), isLocalActive);
         this._useLocalSourceSwitch.connect('toggled', (item, state) => {
-            this._settings.set_string('wallpaper-source', state ? 'local' : 'online');
+            this._setStringSetting('wallpaper-source', state ? 'local' : 'online');
         });
         localSubMenu.menu.addMenuItem(this._useLocalSourceSwitch);
 
-        const openLocalDirItem = new PopupMenu.PopupImageMenuItem(_('Open Photos Folder'), 'folder-open-symbolic');
+        const openLocalDirItem = new PopupMenu.PopupImageMenuItem(this._gettext('Open Photos Folder'), 'folder-open-symbolic');
         openLocalDirItem.connect('activate', () => {
             const localDir = this._getLocalPhotosDirectory();
             runCommandAsync(['xdg-open', localDir]);
@@ -516,18 +576,18 @@ class WchangerIndicator extends PanelMenu.Button {
         localSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
             if (isOpen) {
                 const localDir = this._getLocalPhotosDirectory();
-                const recursive = this._settings.get_boolean('recursive-scan');
+                const recursive = this._getBooleanSetting('recursive-scan', true);
                 const photos = getLocalPhotos(localDir, recursive);
                 const countText = photos.length > 0
-                    ? `${photos.length} ${_('photos found')}`
-                    : _('No photos found');
+                    ? `${photos.length} ${this._gettext('photos found')}`
+                    : this._gettext('No photos found');
                 const homeDir = GLib.get_home_dir();
                 const displayDir = localDir.startsWith(homeDir)
                     ? `~${localDir.substring(homeDir.length)}`
                     : localDir;
                 this._localPhotoCountLabel.label.set_text(`${displayDir} (${countText})`);
 
-                const isLocal = this._settings.get_string('wallpaper-source') === 'local';
+                const isLocal = this._getStringSetting('wallpaper-source', 'local') === 'local';
                 if (this._useLocalSourceSwitch.state !== isLocal) {
                     this._useLocalSourceSwitch.setToggleState(isLocal);
                 }
@@ -537,27 +597,27 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(localSubMenu);
 
         // Section 3: Online Sources Submenu
-        const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Online Providers'), true);
+        const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Online Providers'), true);
         if (sourcesSubMenu.icon) {
             sourcesSubMenu.icon.icon_name = 'applications-internet-symbolic';
         }
 
         const providers = [
-            { label: _('Wallhaven'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
-            { label: _('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
-            { label: _('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
-            { label: _('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
+            { label: this._gettext('Wallhaven'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
+            { label: this._gettext('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
+            { label: this._gettext('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
+            { label: this._gettext('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
         ];
         providers.forEach(p => {
             const item = new PopupMenu.PopupImageMenuItem(p.label, p.icon);
             item.connect('activate', () => {
-                this._settings.set_string('wallpaper-source', 'online');
-                this._settings.set_string('default-provider', p.key);
-                const multiMon = this._settings.get_boolean('enable-multi-monitor');
+                this._setStringSetting('wallpaper-source', 'online');
+                this._setStringSetting('default-provider', p.key);
+                const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', p.key, '--no-repetition'];
                 if (p.key === 'wallhaven') {
-                    const category = this._settings.get_string('wallhaven-category') || 'nature';
-                    if (category) {
+                    const category = (this._getStringSetting('wallhaven-category', 'nature') || '').trim();
+                    if (category.length > 0) {
                         args.push('-C', category);
                     }
                 }
@@ -569,20 +629,33 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(sourcesSubMenu);
 
         // Section 3b: Wallhaven Categories Submenu
-        const wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Wallhaven Categories'), true);
+        const wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Wallhaven Categories'), true);
         if (wallhavenSubMenu.icon) {
             wallhavenSubMenu.icon.icon_name = 'view-grid-symbolic';
         }
 
+        const wallhavenCategories = [
+            { key: 'nature', label: this._gettext('Nature & Landscapes') },
+            { key: 'space', label: this._gettext('Space & Astronomy') },
+            { key: 'anime', label: this._gettext('Anime Artwork') },
+            { key: 'cyberpunk', label: this._gettext('Cyberpunk & Sci-Fi') },
+            { key: 'city', label: this._gettext('City & Architecture') },
+            { key: 'cars', label: this._gettext('Cars & Vehicles') },
+            { key: 'gaming', label: this._gettext('Gaming & Fantasy') },
+            { key: 'minimalism', label: this._gettext('Minimalism') },
+            { key: 'general', label: this._gettext('General Photography') },
+            { key: 'all', label: this._gettext('All (Random)') },
+        ];
+
         this._wallhavenMenuItems = [];
-        WALLHAVEN_CATEGORIES.forEach(cat => {
+        wallhavenCategories.forEach(cat => {
             const item = new PopupMenu.PopupMenuItem(cat.label);
             item._categoryKey = cat.key;
             item.connect('activate', () => {
-                this._settings.set_string('wallpaper-source', 'online');
-                this._settings.set_string('default-provider', 'wallhaven');
-                this._settings.set_string('wallhaven-category', cat.key);
-                const multiMon = this._settings.get_boolean('enable-multi-monitor');
+                this._setStringSetting('wallpaper-source', 'online');
+                this._setStringSetting('default-provider', 'wallhaven');
+                this._setStringSetting('wallhaven-category', cat.key);
+                const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', 'wallhaven', '-C', cat.key, '--no-repetition'];
                 if (multiMon) args.push('-m');
                 this._runWchangerCommand(args);
@@ -592,14 +665,19 @@ class WchangerIndicator extends PanelMenu.Button {
         });
 
         const updateWallhavenMenuOrnaments = () => {
-            const currentCat = (this._settings.get_string('wallhaven-category') || 'nature').toLowerCase().trim();
+            const currentCat = (this._getStringSetting('wallhaven-category', 'nature') || 'nature').toLowerCase().trim();
             for (const item of this._wallhavenMenuItems) {
                 const isSelected = (item._categoryKey === currentCat);
-                if (item.setOrnament && PopupMenu.Ornament) {
-                    item.setOrnament(isSelected ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
+                if (typeof item.setOrnament === 'function') {
+                    const checkOrnament = PopupMenu.Ornament?.CHECK ?? 2;
+                    const noneOrnament = PopupMenu.Ornament?.NONE ?? 0;
+                    item.setOrnament(isSelected ? checkOrnament : noneOrnament);
                 }
             }
         };
+
+        // Initialize checkmarks immediately
+        updateWallhavenMenuOrnaments();
 
         wallhavenSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
             if (isOpen) {
@@ -610,22 +688,22 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(wallhavenSubMenu);
 
         // Section 3c: Multi-Monitor Quick Action
-        const multiMonItem = new PopupMenu.PopupImageMenuItem(_('Rotate Multi-Monitor'), 'video-display-symbolic');
+        const multiMonItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Multi-Monitor'), 'video-display-symbolic');
         multiMonItem.connect('activate', () => {
-            const source = this._settings.get_string('wallpaper-source');
+            const source = this._getStringSetting('wallpaper-source', 'local');
             if (source === 'local') {
                 const localDir = this._getLocalPhotosDirectory();
-                const recursive = this._settings.get_boolean('recursive-scan');
+                const recursive = this._getBooleanSetting('recursive-scan', true);
                 const args = ['-m', '--no-repetition'];
                 if (recursive) args.push('-R');
                 args.push(localDir);
                 this._runWchangerCommand(args);
             } else {
-                const defaultProvider = this._settings.get_string('default-provider') || 'wallhaven';
+                const defaultProvider = this._getStringSetting('default-provider', 'wallhaven') || 'wallhaven';
                 const args = ['--online', defaultProvider, '-m', '--no-repetition'];
                 if (defaultProvider === 'wallhaven') {
-                    const category = this._settings.get_string('wallhaven-category') || 'nature';
-                    if (category) {
+                    const category = (this._getStringSetting('wallhaven-category', 'nature') || '').trim();
+                    if (category.length > 0) {
                         args.push('-C', category);
                     }
                 }
@@ -637,7 +715,7 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Section 4: Automatic Background Rotator Switch
-        this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem(_('Background Rotator'), false);
+        this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Background Rotator'), false);
         const rotatorIcon = new St.Icon({
             icon_name: 'view-refresh-symbolic',
             style_class: 'popup-menu-icon',
@@ -645,7 +723,7 @@ class WchangerIndicator extends PanelMenu.Button {
         this._serviceSwitch.insert_child_at_index(rotatorIcon, 0);
 
         this._serviceSwitch.connect('toggled', (item, state) => {
-            this._settings.set_boolean('rotator-enabled', state);
+            this._setBooleanSetting('rotator-enabled', state);
             if (state) {
                 this._startRotatorTimer();
                 this._triggerWchangerRotation();
@@ -658,14 +736,14 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._serviceSwitch);
 
         // Section 5: Folder & Settings shortcuts
-        const openFavsItem = new PopupMenu.PopupImageMenuItem(_('Open Favorites Folder'), 'folder-open-symbolic');
+        const openFavsItem = new PopupMenu.PopupImageMenuItem(this._gettext('Open Favorites Folder'), 'folder-open-symbolic');
         openFavsItem.connect('activate', () => {
             const favDir = this._getFavoritesDirectory();
             runCommandAsync(['xdg-open', favDir]);
         });
         this.menu.addMenuItem(openFavsItem);
 
-        const prefsItem = new PopupMenu.PopupImageMenuItem(_('Extension Settings…'), 'preferences-system-symbolic');
+        const prefsItem = new PopupMenu.PopupImageMenuItem(this._gettext('Extension Settings…'), 'preferences-system-symbolic');
         prefsItem.connect('activate', () => {
             this._extension.openPreferences();
         });
@@ -686,7 +764,7 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _initRotator() {
-        const enabled = this._settings.get_boolean('rotator-enabled');
+        const enabled = this._getBooleanSetting('rotator-enabled', false);
         this._serviceSwitch.setToggleState(enabled);
         if (enabled) {
             this._startRotatorTimer();
@@ -696,7 +774,7 @@ class WchangerIndicator extends PanelMenu.Button {
 
     _startRotatorTimer() {
         this._stopRotatorTimer();
-        let intervalSec = this._settings.get_int('rotation-interval');
+        let intervalSec = this._getIntSetting('rotation-interval', 300);
         if (intervalSec < 30) {
             intervalSec = 300;
         }
@@ -719,21 +797,21 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _triggerWchangerRotation() {
-        const source = this._settings.get_string('wallpaper-source');
+        const source = this._getStringSetting('wallpaper-source', 'local');
         if (source === 'local') {
             this._applyRandomLocalPhoto();
             return;
         }
 
-        const multiMon = this._settings.get_boolean('enable-multi-monitor');
-        const defaultProvider = this._settings.get_string('default-provider') || 'wallhaven';
+        const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
+        const defaultProvider = this._getStringSetting('default-provider', 'wallhaven') || 'wallhaven';
         const args = ['--online', defaultProvider, '--no-repetition'];
         if (multiMon) {
             args.push('-m');
         }
         if (defaultProvider === 'wallhaven') {
-            const category = this._settings.get_string('wallhaven-category') || 'nature';
-            if (category) {
+            const category = (this._getStringSetting('wallhaven-category', 'nature') || '').trim();
+            if (category.length > 0) {
                 args.push('-C', category);
             }
         }
@@ -741,12 +819,12 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _runWchangerCommand(args) {
-        const customPath = this._settings.get_string('custom-wchanger-path');
+        const customPath = this._getStringSetting('custom-wchanger-path', '');
         const baseCmd = getWchangerCommand(customPath);
         if (!baseCmd) {
             Main.notify(
                 'Anahita Wallpaper Changer',
-                _('“wchanger” command not found. Please install via “pip install .” or configure path in settings.')
+                this._gettext('“wchanger” command not found. Please install via “pip install .” or configure path in settings.')
             );
             return;
         }
@@ -758,14 +836,14 @@ class WchangerIndicator extends PanelMenu.Button {
             } else {
                 Main.notify(
                     'Anahita Wallpaper Changer',
-                    _('Failed to rotate wallpaper. Please verify image path or online connection.')
+                    this._gettext('Failed to rotate wallpaper. Please verify image path or online connection.')
                 );
             }
         });
     }
 
     _getFavoritesDirectory() {
-        let customPath = this._settings.get_string('favorites-directory');
+        let customPath = this._getStringSetting('favorites-directory', '');
         if (!customPath || customPath.trim().length === 0) {
             const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
             customPath = `${pics}/Wallpapers/Favorites`;
@@ -785,7 +863,7 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _getLocalPhotosDirectory() {
-        let customPath = this._settings.get_string('wallpapers-directory');
+        let customPath = this._getStringSetting('wallpapers-directory', '');
         if (!customPath || customPath.trim().length === 0) {
             const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
             customPath = `${pics}/Wallpapers`;
@@ -807,13 +885,13 @@ class WchangerIndicator extends PanelMenu.Button {
 
     _applyRandomLocalPhoto() {
         const localDir = this._getLocalPhotosDirectory();
-        const recursive = this._settings.get_boolean('recursive-scan');
+        const recursive = this._getBooleanSetting('recursive-scan', true);
         const photos = getLocalPhotos(localDir, recursive, true);
 
         if (photos.length === 0) {
             Main.notify(
                 'Anahita Wallpaper Changer',
-                _('No photos found in local folder: ') + localDir
+                `${this._gettext('No photos found in local folder:')} ${localDir}`
             );
             return;
         }
@@ -834,13 +912,13 @@ class WchangerIndicator extends PanelMenu.Button {
     _favoriteCurrentWallpaper() {
         const currentPath = this._historyManager.getCurrent();
         if (!currentPath) {
-            Main.notify('Anahita Wallpaper Changer', _('No active wallpaper found to favorite.'));
+            Main.notify('Anahita Wallpaper Changer', this._gettext('No active wallpaper found to favorite.'));
             return;
         }
 
         const sourceFile = Gio.File.new_for_path(currentPath);
         if (!sourceFile.query_exists(null)) {
-            Main.notify('Anahita Wallpaper Changer', _('Active wallpaper file not accessible.'));
+            Main.notify('Anahita Wallpaper Changer', this._gettext('Active wallpaper file not accessible.'));
             return;
         }
 
@@ -859,11 +937,11 @@ class WchangerIndicator extends PanelMenu.Button {
                     file.copy_finish(res);
                     Main.notify(
                         'Anahita Wallpaper Changer',
-                        `${_('Saved to Favorites:')} ${baseName}`
+                        `${this._gettext('Saved to Favorites:')} ${baseName}`
                     );
                 } catch (e) {
                     logError(e, '[wchanger-extension] Failed to copy wallpaper to favorites');
-                    Main.notify('Anahita Wallpaper Changer', _('Failed to save to favorites.'));
+                    Main.notify('Anahita Wallpaper Changer', this._gettext('Failed to save to favorites.'));
                 }
             }
         );
@@ -893,7 +971,7 @@ class WchangerIndicator extends PanelMenu.Button {
                             const activeState = units[0][3];
                             if (activeState === 'active') {
                                 this._serviceSwitch.setToggleState(true);
-                                this._settings.set_boolean('rotator-enabled', true);
+                                this._setBooleanSetting('rotator-enabled', true);
                             }
                         }
                     } catch (e) {
@@ -917,19 +995,34 @@ class WchangerIndicator extends PanelMenu.Button {
 
 export default class WchangerExtension extends Extension {
     enable() {
-        this._settings = this.getSettings('org.gnome.shell.extensions.wchanger');
+        try {
+            this.initTranslations();
+        } catch (e) {}
+        try {
+            this._settings = this.getSettings('org.gnome.shell.extensions.wchanger');
+        } catch (e) {
+            logError(e, '[wchanger-extension] Failed to load extension settings');
+            this._settings = null;
+        }
         this._indicator = null;
 
         // Respect show-indicator setting
-        this._showIndicatorChangedId = this._settings.connect('changed::show-indicator', () => {
-            this._updateIndicatorVisibility();
-        });
+        if (this._settings) {
+            this._showIndicatorChangedId = this._settings.connect('changed::show-indicator', () => {
+                this._updateIndicatorVisibility();
+            });
+        }
 
         this._updateIndicatorVisibility();
     }
 
     _updateIndicatorVisibility() {
-        const show = this._settings.get_boolean('show-indicator');
+        let show = true;
+        try {
+            if (this._settings?.settings_schema?.has_key('show-indicator')) {
+                show = this._settings.get_boolean('show-indicator');
+            }
+        } catch (e) {}
         if (show && !this._indicator) {
             this._indicator = new WchangerIndicator(this);
             Main.panel.addToStatusArea(this.uuid, this._indicator);
@@ -940,7 +1033,7 @@ export default class WchangerExtension extends Extension {
     }
 
     disable() {
-        if (this._showIndicatorChangedId) {
+        if (this._showIndicatorChangedId && this._settings) {
             this._settings.disconnect(this._showIndicatorChangedId);
             this._showIndicatorChangedId = null;
         }

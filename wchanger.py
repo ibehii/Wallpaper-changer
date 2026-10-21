@@ -1349,9 +1349,22 @@ def _fetch_url_with_retry(
                 return response.read()
         except HTTPError as http_error:
             last_network_error = http_error
-            # Only retry transient 5xx server-side errors
-            if http_error.code in (500, 502, 503, 504) and attempt < max_retries - 1:
-                time.sleep(retry_delay_seconds * (2 ** attempt))
+            # Retry transient 5xx server-side errors and HTTP 429 (Too Many Requests / Rate Limiting)
+            if http_error.code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                retry_after_str = (
+                    http_error.headers.get("Retry-After")
+                    if hasattr(http_error, "headers") and http_error.headers
+                    else None
+                )
+                sleep_duration = retry_delay_seconds * (2 ** attempt)
+                if retry_after_str:
+                    try:
+                        parsed_after = float(retry_after_str)
+                        if 0 < parsed_after <= 10.0:
+                            sleep_duration = parsed_after
+                    except (ValueError, TypeError):
+                        pass
+                time.sleep(sleep_duration)
                 continue
             raise
         except (URLError, TimeoutError, ConnectionError, OSError) as network_error:
@@ -1512,8 +1525,21 @@ def download_online_wallpaper(
         except HTTPError as http_error:
             destination_path.unlink(missing_ok=True)
             last_network_error = http_error
-            if http_error.code in (500, 502, 503, 504) and attempt < max_retries - 1:
-                time.sleep(retry_delay_seconds * (2 ** attempt))
+            if http_error.code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                retry_after_str = (
+                    http_error.headers.get("Retry-After")
+                    if hasattr(http_error, "headers") and http_error.headers
+                    else None
+                )
+                sleep_duration = retry_delay_seconds * (2 ** attempt)
+                if retry_after_str:
+                    try:
+                        parsed_after = float(retry_after_str)
+                        if 0 < parsed_after <= 10.0:
+                            sleep_duration = parsed_after
+                    except (ValueError, TypeError):
+                        pass
+                time.sleep(sleep_duration)
                 continue
             raise
         except (URLError, TimeoutError, ConnectionError, OSError) as network_error:
@@ -1697,6 +1723,11 @@ def cleanup_download_cache(
 def format_network_error(provider: str, error: Exception) -> str:
     """Format a user-friendly error message when network requests fail."""
     if isinstance(error, HTTPError):
+        if error.code == 429:
+            return (
+                f"Rate limit exceeded (HTTP 429) for '{provider}'. "
+                "Too many requests have been made in a short time. Please wait a minute before requesting another wallpaper."
+            )
         return (
             f"Server returned HTTP error {error.code} ({error.reason}) "
             f"while requesting from '{provider}'."
@@ -2648,9 +2679,10 @@ def cli(
         elif config_source in ("folder", "local"):
             effective_online_provider = None
 
-    if category and effective_online_provider is not None and effective_online_provider != "wallhaven" and output != "log" and not run_background:
+    if category and effective_online_provider != "wallhaven" and output != "log" and not run_background:
+        provider_display = effective_online_provider or "local folder mode"
         click.secho(
-            f"[!] Notice: The --category option applies only to 'wallhaven' and will be ignored for '{effective_online_provider}'.",
+            f"[!] Notice: The --category option applies only to 'wallhaven' and will be ignored for '{provider_display}'.",
             fg="yellow",
             err=True,
         )
