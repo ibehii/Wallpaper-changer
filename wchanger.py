@@ -23,7 +23,7 @@ import sys
 import time
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote_plus, unquote, urlencode, urlparse
 
 import click
 
@@ -80,6 +80,18 @@ DEFAULT_KEEP_LAST = 20
 DEFAULT_CONFIG_FILENAME = "config.toml"
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "wchanger"
 ONLINE_PROVIDER_CHOICES = ("wallhaven", "bing", "picsum", "loremflickr")
+WALLHAVEN_CATEGORIES = (
+    "nature",
+    "space",
+    "anime",
+    "cyberpunk",
+    "city",
+    "cars",
+    "gaming",
+    "minimalism",
+    "general",
+    "all",
+)
 
 DURATION_TOKEN_REGEX = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]*)")
 
@@ -1353,12 +1365,48 @@ def _fetch_url_with_retry(
     return b""
 
 
-def fetch_wallhaven_url(max_retries: int = 3, retry_delay_seconds: float = 0.5) -> str:
-    """Fetch a random top wallpaper image URL from the Wallhaven API with retries."""
+def build_wallhaven_search_url(category: str | None = None) -> str:
+    """Build Wallhaven API search URL based on optional category or search keyword."""
+    base_url = "https://wallhaven.cc/api/v1/search"
+    params: dict[str, str] = {
+        "sorting": "random",
+        "purity": "100",
+        "atleast": "1920x1080",
+    }
+    if not category:
+        params["sorting"] = "toplist"
+        params["topRange"] = "1d"
+        return f"{base_url}?{urlencode(params)}"
+
+    cat = category.strip().lower()
+    if cat in ("all", "random"):
+        params["sorting"] = "random"
+    elif cat in ("toplist",):
+        params["sorting"] = "toplist"
+        params["topRange"] = "1d"
+    elif cat == "anime":
+        params["categories"] = "010"
+    elif cat == "general":
+        params["categories"] = "100"
+    elif cat == "people":
+        params["categories"] = "001"
+    elif cat in ("nature", "space", "city", "minimalism"):
+        params["categories"] = "100"
+        params["q"] = cat
+    else:
+        params["q"] = category.strip()
+
+    return f"{base_url}?{urlencode(params)}"
+
+
+def fetch_wallhaven_url(
+    category: str | None = None,
+    max_retries: int = 3,
+    retry_delay_seconds: float = 0.5,
+) -> str:
+    """Fetch a wallpaper image URL from the Wallhaven API with retries and category support."""
     _ensure_urllib()
-    api_url = (
-        "https://wallhaven.cc/api/v1/search?sorting=toplist&topRange=1d&purity=100&atleast=1920x1080"
-    )
+    api_url = build_wallhaven_search_url(category)
     request = Request(api_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
     raw_payload = _fetch_url_with_retry(
         request,
@@ -1369,7 +1417,8 @@ def fetch_wallhaven_url(max_retries: int = 3, retry_delay_seconds: float = 0.5) 
     payload = json.loads(raw_payload.decode("utf-8"))
     wallpapers = payload.get("data", [])
     if not wallpapers:
-        raise ValueError("No wallpapers found in Wallhaven API response.")
+        cat_info = f" for category '{category}'" if category else ""
+        raise ValueError(f"No wallpapers found in Wallhaven API response{cat_info}.")
     selected = random.choice(wallpapers)
     image_url = selected.get("path")
     if not image_url:
@@ -1416,6 +1465,20 @@ ONLINE_PROVIDERS = {
     "picsum": fetch_picsum_url,
     "loremflickr": fetch_loremflickr_url,
 }
+
+
+def get_online_wallpaper_url(provider: str, category: str | None = None) -> str:
+    """Get next wallpaper URL from an online provider, passing category to Wallhaven if specified."""
+    provider_key = provider.lower()
+    fetcher = ONLINE_PROVIDERS.get(provider_key)
+    if fetcher is None:
+        raise ValueError(f"Unknown online provider '{provider}'.")
+    if provider_key == "wallhaven" and category:
+        try:
+            return fetcher(category=category)
+        except TypeError:
+            return fetcher()
+    return fetcher()
 
 
 def download_online_wallpaper(
@@ -1469,6 +1532,7 @@ def download_online_wallpaper(
 def get_prefetch_candidate(
     cache_dir: Path | str,
     provider: str,
+    category: str | None = None,
     monitor_index: int | None = None,
 ) -> Path | None:
     """Find a ready prefetched wallpaper file for the provider if available and valid."""
@@ -1476,8 +1540,15 @@ def get_prefetch_candidate(
     if not os.path.isdir(dir_path):
         return None
 
+    provider_key = provider.lower()
+    cat_part = ""
+    if provider_key == "wallhaven" and category:
+        cat_clean = re.sub(r"[^a-zA-Z0-9_-]", "", category.strip().lower())
+        if cat_clean:
+            cat_part = f"_{cat_clean}"
+
     suffix_pattern = f"_m{monitor_index}" if monitor_index is not None else ""
-    prefix = f"prefetch_{provider.lower()}{suffix_pattern}"
+    prefix = f"prefetch_{provider_key}{cat_part}{suffix_pattern}"
 
     try:
         with os.scandir(dir_path) as entries:
@@ -1500,6 +1571,7 @@ def get_prefetch_candidate(
 
 def prefetch_online_wallpaper(
     provider: str,
+    category: str | None = None,
     cache_dir: Path | str | None = None,
     multi_monitor: bool = False,
     desktop_environment: str | None = None,
@@ -1516,14 +1588,20 @@ def prefetch_online_wallpaper(
     monitor_count = get_effective_monitor_count(desktop_environment, multi_monitor=True) if multi_monitor else 1
     prefetched_paths: list[Path] = []
 
+    cat_part = ""
+    if provider_key == "wallhaven" and category:
+        cat_clean = re.sub(r"[^a-zA-Z0-9_-]", "", category.strip().lower())
+        if cat_clean:
+            cat_part = f"_{cat_clean}"
+
     for idx in range(monitor_count):
         try:
-            image_url = fetcher()
+            image_url = get_online_wallpaper_url(provider_key, category=category)
             parsed_path = Path(urlparse(image_url).path).suffix.lower()
             extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
             suffix = f"_m{idx}" if multi_monitor else ""
-            final_path = target_cache_dir / f"prefetch_{provider_key}{suffix}{extension}"
-            temp_path = target_cache_dir / f"prefetch_{provider_key}{suffix}_part{extension}"
+            final_path = target_cache_dir / f"prefetch_{provider_key}{cat_part}{suffix}{extension}"
+            temp_path = target_cache_dir / f"prefetch_{provider_key}{cat_part}{suffix}_part{extension}"
 
             download_online_wallpaper(image_url, temp_path)
             if is_valid_image_file(temp_path):
@@ -1539,6 +1617,7 @@ def prefetch_online_wallpaper(
 
 def spawn_background_prefetch(
     provider: str,
+    category: str | None = None,
     target_cache_dir: Path | str | None = None,
     multi_monitor: bool = False,
     desktop_environment: str | None = None,
@@ -1555,6 +1634,8 @@ def spawn_background_prefetch(
             "--no-config",
             "--prefetch-only",
         ]
+        if category and provider.lower() == "wallhaven":
+            cmd.extend(["-C", category])
         if multi_monitor:
             cmd.append("--multi-monitor")
         if desktop_environment:
@@ -1816,6 +1897,7 @@ def run_online_wallpaper_cycle(
     pause_seconds: int,
     repetition: bool,
     output_mode: str,
+    category: str | None = None,
     color_theme: str | None = None,
     cache_dir: Path | None = None,
     keep_last: int = DEFAULT_KEEP_LAST,
@@ -1830,6 +1912,7 @@ def run_online_wallpaper_cycle(
 
     target_cache_dir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
     target_cache_dir.mkdir(parents=True, exist_ok=True)
+    cat_desc = f" (category: '{category}')" if category and provider_key == "wallhaven" else ""
 
     try:
         while True:
@@ -1837,7 +1920,7 @@ def run_online_wallpaper_cycle(
             try:
                 if not multi_monitor:
                     image_url_info: str = ""
-                    prefetched = get_prefetch_candidate(target_cache_dir, provider_key) if prefetch else None
+                    prefetched = get_prefetch_candidate(target_cache_dir, provider_key, category=category) if prefetch else None
                     if prefetched is not None:
                         timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
                         random_identifier = random.randint(1000, 9999)
@@ -1845,12 +1928,12 @@ def run_online_wallpaper_cycle(
                         prefetched.replace(cache_file)
                         image_url_info = "pre-fetched instant image"
                         if output_mode != "log":
-                            print(f"{CYAN}[i] Using pre-fetched instant wallpaper from '{provider_key}'...{RESET}")
+                            print(f"{CYAN}[i] Using pre-fetched instant wallpaper from '{provider_key}'{cat_desc}...{RESET}")
                     else:
                         if output_mode != "log":
-                            print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'...{RESET}")
+                            print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'{cat_desc}...{RESET}")
 
-                        image_url = fetcher()
+                        image_url = get_online_wallpaper_url(provider_key, category=category)
                         image_url_info = image_url
                         parsed_path = Path(urlparse(image_url).path).suffix.lower()
                         extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
@@ -1869,7 +1952,7 @@ def run_online_wallpaper_cycle(
 
                     if operation_success:
                         cycle_succeeded = True
-                        log_detail = f"Online wallpaper updated from {provider_key}: {image_url_info}"
+                        log_detail = f"Online wallpaper updated from {provider_key}{cat_desc}: {image_url_info}"
                         if output_mode == "log":
                             logging.info(log_detail)
                         else:
@@ -1884,6 +1967,7 @@ def run_online_wallpaper_cycle(
                         if prefetch:
                             spawn_background_prefetch(
                                 provider=provider_key,
+                                category=category,
                                 target_cache_dir=target_cache_dir,
                                 multi_monitor=False,
                                 desktop_environment=desktop_environment,
@@ -1903,7 +1987,12 @@ def run_online_wallpaper_cycle(
                     candidate_prefetches: list[Path] = []
                     if prefetch:
                         for monitor_index in range(monitor_count):
-                            candidate = get_prefetch_candidate(target_cache_dir, provider_key, monitor_index=monitor_index)
+                            candidate = get_prefetch_candidate(
+                                target_cache_dir,
+                                provider_key,
+                                category=category,
+                                monitor_index=monitor_index,
+                            )
                             if candidate is not None:
                                 candidate_prefetches.append(candidate)
                             else:
@@ -1915,7 +2004,7 @@ def run_online_wallpaper_cycle(
                     if all_prefetched and len(candidate_prefetches) == monitor_count:
                         if output_mode != "log":
                             print(
-                                f"{CYAN}[i] Using {monitor_count} pre-fetched instant wallpapers from '{provider_key}' for multi-monitor...{RESET}"
+                                f"{CYAN}[i] Using {monitor_count} pre-fetched instant wallpapers from '{provider_key}'{cat_desc} for multi-monitor...{RESET}"
                             )
                         timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
                         for monitor_index, prefetched_file in enumerate(candidate_prefetches):
@@ -1927,11 +2016,11 @@ def run_online_wallpaper_cycle(
                     else:
                         if output_mode != "log":
                             print(
-                                f"{CYAN}[i] Fetching {monitor_count} online wallpapers from '{provider_key}' for multi-monitor...{RESET}"
+                                f"{CYAN}[i] Fetching {monitor_count} online wallpapers from '{provider_key}'{cat_desc} for multi-monitor...{RESET}"
                             )
 
                         for monitor_index in range(monitor_count):
-                            image_url = fetcher()
+                            image_url = get_online_wallpaper_url(provider_key, category=category)
                             wallpaper_urls.append(image_url)
                             parsed_path = Path(urlparse(image_url).path).suffix.lower()
                             extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
@@ -1949,7 +2038,7 @@ def run_online_wallpaper_cycle(
 
                     if operation_success:
                         cycle_succeeded = True
-                        log_detail = f"Online wallpapers updated from {provider_key} across {monitor_count} monitors: {wallpaper_urls}"
+                        log_detail = f"Online wallpapers updated from {provider_key}{cat_desc} across {monitor_count} monitors: {wallpaper_urls}"
                         if output_mode == "log":
                             logging.info(log_detail)
                         else:
@@ -1964,6 +2053,7 @@ def run_online_wallpaper_cycle(
                         if prefetch:
                             spawn_background_prefetch(
                                 provider=provider_key,
+                                category=category,
                                 target_cache_dir=target_cache_dir,
                                 multi_monitor=True,
                                 desktop_environment=desktop_environment,
@@ -1978,7 +2068,7 @@ def run_online_wallpaper_cycle(
             except (URLError, HTTPError, TimeoutError, ConnectionError, OSError, ValueError) as network_error:
                 error_details = format_network_error(provider_key, network_error)
                 if output_mode == "log":
-                    logging.error(f"Network error with online provider '{provider_key}': {error_details}")
+                    logging.error(f"Network error with online provider '{provider_key}'{cat_desc}: {error_details}")
                 else:
                     click.secho(f"[!] Network Error: {error_details}", fg="red", bold=True, err=True)
 
@@ -1987,7 +2077,7 @@ def run_online_wallpaper_cycle(
 
             if not repetition:
                 if cycle_succeeded:
-                    completion_message = f"Online wallpaper from '{provider_key}' applied successfully."
+                    completion_message = f"Online wallpaper from '{provider_key}'{cat_desc} applied successfully."
                     if output_mode == "log":
                         logging.info(completion_message)
                     else:
@@ -2028,6 +2118,7 @@ def setup_install_autostart_service(
     color_theme: str | None = None,
     initial_photo_path: Path | None = None,
     online_provider: str | None = None,
+    category: str | None = None,
     shuffle: bool = False,
     recursive: bool = False,
     keep_last: int | None = None,
@@ -2143,6 +2234,8 @@ def setup_install_autostart_service(
         command_tokens.append("--multi-monitor")
     if online_provider:
         command_tokens.extend(["--online", online_provider.lower()])
+        if category and online_provider.lower() == "wallhaven":
+            command_tokens.extend(["-C", category])
         if keep_last is not None:
             command_tokens.extend(["--keep-last", str(keep_last)])
     elif chosen_directory is not None:
@@ -2328,6 +2421,13 @@ setup_install_autostart = setup_install_autostart_service
     help="Fetch wallpapers online from a provider (wallhaven, bing, picsum, loremflickr).",
 )
 @click.option(
+    "--category",
+    "-C",
+    "category",
+    default=None,
+    help="Category or keyword filter for Wallhaven online provider (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general, all).",
+)
+@click.option(
     "--source",
     type=click.Choice(["folder", "local", *ONLINE_PROVIDER_CHOICES], case_sensitive=False),
     default=None,
@@ -2415,6 +2515,7 @@ def cli(
     desktop_override: str | None,
     online: str | None,
     source: str | None,
+    category: str | None,
     shuffle: bool,
     recursive: bool,
     run_background: bool,
@@ -2505,10 +2606,18 @@ def cli(
     if not prefetch_from_cli and "prefetch" in config_settings:
         prefetch = bool(config_settings["prefetch"])
 
+    category_from_cli = click_context.get_parameter_source("category") == click.core.ParameterSource.COMMANDLINE
+    if not category_from_cli and "category" in config_settings and config_settings["category"] is not None:
+        config_cat = str(config_settings["category"]).strip()
+        if config_cat:
+            category = config_cat
+
     if prefetch_only:
         target_provider = online or str(config_settings.get("online", "wallhaven"))
+        target_category = category
         prefetch_online_wallpaper(
             provider=target_provider,
+            category=target_category,
             cache_dir=custom_cache_dir,
             multi_monitor=multi_monitor,
             desktop_environment=desktop_override,
@@ -2530,6 +2639,8 @@ def cli(
             effective_online_provider = None
         else:
             effective_online_provider = source_normalized
+    elif category_from_cli:
+        effective_online_provider = "wallhaven"
     elif "source" in config_settings:
         config_source = str(config_settings["source"]).strip().lower()
         if config_source in ONLINE_PROVIDER_CHOICES:
@@ -2537,12 +2648,20 @@ def cli(
         elif config_source in ("folder", "local"):
             effective_online_provider = None
 
+    if category and effective_online_provider is not None and effective_online_provider != "wallhaven" and output != "log" and not run_background:
+        click.secho(
+            f"[!] Notice: The --category option applies only to 'wallhaven' and will be ignored for '{effective_online_provider}'.",
+            fg="yellow",
+            err=True,
+        )
+
     if install_autostart:
         setup_install_autostart_service(
             desktop_override=desktop_override,
             color_theme=theme,
             initial_photo_path=photo_path,
             online_provider=effective_online_provider,
+            category=category,
             shuffle=shuffle,
             recursive=recursive,
             keep_last=keep_last,
@@ -2643,6 +2762,7 @@ def cli(
                 pause_seconds=pause,
                 repetition=repetition,
                 output_mode=output,
+                category=category,
                 color_theme=theme,
                 cache_dir=custom_cache_dir,
                 keep_last=keep_last,
@@ -2658,7 +2778,8 @@ def cli(
             + (" (forced via flag)" if desktop_override else " (auto-detected)")
             + f"{RESET}"
         )
-        print(f"{CYAN}[i] Wallpaper source: online provider '{online_provider}'{RESET}")
+        cat_info = f" (category: '{category}')" if category and online_provider == "wallhaven" else ""
+        print(f"{CYAN}[i] Wallpaper source: online provider '{online_provider}'{cat_info}{RESET}")
         print(f"{CYAN}[i] Tip: Customize settings in 'config.toml' or by passing command-line options (see README.md).{RESET}")
         if multi_monitor:
             effective_monitors = get_effective_monitor_count(desktop_environment, multi_monitor=True)
@@ -2670,6 +2791,7 @@ def cli(
             pause_seconds=pause,
             repetition=repetition,
             output_mode=output,
+            category=category,
             color_theme=theme,
             cache_dir=custom_cache_dir,
             keep_last=keep_last,

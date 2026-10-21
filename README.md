@@ -307,6 +307,12 @@ Never run out of wallpapers. Stream directly from popular photo curation platfor
 # Bing Daily Wallpaper (single pass, update and exit):
 wchanger --online bing --no-repetition
 
+# Wallhaven with category filter (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general):
+wchanger --online wallhaven -C nature -p 5m -b
+
+# Wallhaven with custom keyword search (single pass):
+wchanger -C cyberpunk --no-repetition
+
 # Wallhaven Toplist (rotate every 5 minutes in background):
 wchanger --online wallhaven -p 5m -b
 
@@ -426,6 +432,7 @@ Usage: wchanger [OPTIONS] [PHOTO_PATH]
 | `--recursive` / `--no-recursive` | `-R` | Flag | `false` | Recursively scan subfolders for valid images. |
 | `--multi-monitor` / `--single-monitor` | `-m` | Flag | `false` | Assign different wallpapers across connected displays. |
 | `--online` | | Choice | `None` | Stream online wallpapers (`wallhaven`, `bing`, `picsum`, `loremflickr`). |
+| `--category` | `-C` | String | `None` | Category or search keyword for Wallhaven (`nature`, `space`, `anime`, `cyberpunk`, etc.). |
 | `--source` | | Choice | `folder` | Source mode (`folder`, `local`, or online provider name). |
 | `--keep-last` | | Integer | `20` | Max downloaded wallpapers to retain in `~/.cache/wchanger/`. |
 | `--run-background` | `-b` | Flag | `false` | Run as a silent, detached daemon process. |

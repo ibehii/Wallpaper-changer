@@ -56,5 +56,10 @@
       <summary>Scan local wallpaper subdirectories recursively</summary>
       <description>Whether to search for images recursively in subfolders of the local wallpapers directory.</description>
     </key>
+    <key name="wallhaven-category" type="s">
+      <default>"nature"</default>
+      <summary>Wallhaven wallpaper category or query</summary>
+      <description>Category or keyword tag used when fetching wallpapers from Wallhaven (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general, all).</description>
+    </key>
   </schema>
 </schemalist>

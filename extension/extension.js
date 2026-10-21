@@ -12,6 +12,19 @@ const GNOME_BG_SCHEMA = 'org.gnome.desktop.background';
 const MAX_HISTORY_ITEMS = 50;
 const SUPPORTED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.svg', '.tiff']);
 
+const WALLHAVEN_CATEGORIES = [
+    { key: 'nature', label: _('Nature & Landscapes') },
+    { key: 'space', label: _('Space & Astronomy') },
+    { key: 'anime', label: _('Anime Artwork') },
+    { key: 'cyberpunk', label: _('Cyberpunk & Sci-Fi') },
+    { key: 'city', label: _('City & Architecture') },
+    { key: 'cars', label: _('Cars & Vehicles') },
+    { key: 'gaming', label: _('Gaming & Fantasy') },
+    { key: 'minimalism', label: _('Minimalism') },
+    { key: 'general', label: _('General Photography') },
+    { key: 'all', label: _('All (Random)') },
+];
+
 /**
  * Recursively or non-recursively enumerate image files in a directory.
  * Safely guards against circular symlinks, deep nesting, and limits file count for UI responsiveness.
@@ -396,6 +409,7 @@ class WchangerIndicator extends PanelMenu.Button {
         }
         this._bgSettings = null;
         this._settings = null;
+        this._wallhavenMenuItems = null;
         super.destroy();
     }
 
@@ -529,8 +543,8 @@ class WchangerIndicator extends PanelMenu.Button {
         }
 
         const providers = [
+            { label: _('Wallhaven'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
             { label: _('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
-            { label: _('Wallhaven Toplist'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
             { label: _('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
             { label: _('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
         ];
@@ -541,6 +555,12 @@ class WchangerIndicator extends PanelMenu.Button {
                 this._settings.set_string('default-provider', p.key);
                 const multiMon = this._settings.get_boolean('enable-multi-monitor');
                 const args = ['--online', p.key, '--no-repetition'];
+                if (p.key === 'wallhaven') {
+                    const category = this._settings.get_string('wallhaven-category') || 'nature';
+                    if (category) {
+                        args.push('-C', category);
+                    }
+                }
                 if (multiMon) args.push('-m');
                 this._runWchangerCommand(args);
             });
@@ -548,10 +568,69 @@ class WchangerIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(sourcesSubMenu);
 
-        // Section 3: Multi-Monitor Quick Action
+        // Section 3b: Wallhaven Categories Submenu
+        const wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Wallhaven Categories'), true);
+        if (wallhavenSubMenu.icon) {
+            wallhavenSubMenu.icon.icon_name = 'view-grid-symbolic';
+        }
+
+        this._wallhavenMenuItems = [];
+        WALLHAVEN_CATEGORIES.forEach(cat => {
+            const item = new PopupMenu.PopupMenuItem(cat.label);
+            item._categoryKey = cat.key;
+            item.connect('activate', () => {
+                this._settings.set_string('wallpaper-source', 'online');
+                this._settings.set_string('default-provider', 'wallhaven');
+                this._settings.set_string('wallhaven-category', cat.key);
+                const multiMon = this._settings.get_boolean('enable-multi-monitor');
+                const args = ['--online', 'wallhaven', '-C', cat.key, '--no-repetition'];
+                if (multiMon) args.push('-m');
+                this._runWchangerCommand(args);
+            });
+            this._wallhavenMenuItems.push(item);
+            wallhavenSubMenu.menu.addMenuItem(item);
+        });
+
+        const updateWallhavenMenuOrnaments = () => {
+            const currentCat = (this._settings.get_string('wallhaven-category') || 'nature').toLowerCase().trim();
+            for (const item of this._wallhavenMenuItems) {
+                const isSelected = (item._categoryKey === currentCat);
+                if (item.setOrnament && PopupMenu.Ornament) {
+                    item.setOrnament(isSelected ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
+                }
+            }
+        };
+
+        wallhavenSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen) {
+                updateWallhavenMenuOrnaments();
+            }
+        });
+
+        this.menu.addMenuItem(wallhavenSubMenu);
+
+        // Section 3c: Multi-Monitor Quick Action
         const multiMonItem = new PopupMenu.PopupImageMenuItem(_('Rotate Multi-Monitor'), 'video-display-symbolic');
         multiMonItem.connect('activate', () => {
-            this._runWchangerCommand(['-m', '--no-repetition']);
+            const source = this._settings.get_string('wallpaper-source');
+            if (source === 'local') {
+                const localDir = this._getLocalPhotosDirectory();
+                const recursive = this._settings.get_boolean('recursive-scan');
+                const args = ['-m', '--no-repetition'];
+                if (recursive) args.push('-R');
+                args.push(localDir);
+                this._runWchangerCommand(args);
+            } else {
+                const defaultProvider = this._settings.get_string('default-provider') || 'wallhaven';
+                const args = ['--online', defaultProvider, '-m', '--no-repetition'];
+                if (defaultProvider === 'wallhaven') {
+                    const category = this._settings.get_string('wallhaven-category') || 'nature';
+                    if (category) {
+                        args.push('-C', category);
+                    }
+                }
+                this._runWchangerCommand(args);
+            }
         });
         this.menu.addMenuItem(multiMonItem);
 
@@ -647,9 +726,16 @@ class WchangerIndicator extends PanelMenu.Button {
         }
 
         const multiMon = this._settings.get_boolean('enable-multi-monitor');
-        const args = ['--no-repetition'];
+        const defaultProvider = this._settings.get_string('default-provider') || 'wallhaven';
+        const args = ['--online', defaultProvider, '--no-repetition'];
         if (multiMon) {
             args.push('-m');
+        }
+        if (defaultProvider === 'wallhaven') {
+            const category = this._settings.get_string('wallhaven-category') || 'nature';
+            if (category) {
+                args.push('-C', category);
+            }
         }
         this._runWchangerCommand(args);
     }

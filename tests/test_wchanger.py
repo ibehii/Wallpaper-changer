@@ -3573,6 +3573,79 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         mock_prefetch.assert_called_once()
 
+    def test_build_wallhaven_search_url_default(self) -> None:
+        """build_wallhaven_search_url without category should return toplist search URL."""
+        url = wchanger.build_wallhaven_search_url()
+        self.assertIn("sorting=toplist", url)
+        self.assertIn("topRange=1d", url)
+        self.assertIn("purity=100", url)
+        self.assertIn("atleast=1920x1080", url)
+
+    def test_build_wallhaven_search_url_presets(self) -> None:
+        """build_wallhaven_search_url should correctly format preset and custom query parameters."""
+        nature_url = wchanger.build_wallhaven_search_url("nature")
+        self.assertIn("q=nature", nature_url)
+        self.assertIn("categories=100", nature_url)
+        self.assertIn("sorting=random", nature_url)
+
+        anime_url = wchanger.build_wallhaven_search_url("anime")
+        self.assertIn("categories=010", anime_url)
+        self.assertIn("sorting=random", anime_url)
+
+        custom_url = wchanger.build_wallhaven_search_url("synthwave neon")
+        self.assertIn("q=synthwave+neon", custom_url)
+        self.assertIn("sorting=random", custom_url)
+
+        all_url = wchanger.build_wallhaven_search_url("all")
+        self.assertIn("sorting=random", all_url)
+
+    @patch("wchanger.urlopen")
+    def test_fetch_wallhaven_url_with_category(self, mock_urlopen: MagicMock) -> None:
+        """fetch_wallhaven_url with category should request URL with category parameters."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = (
+            b'{"data": [{"id": "nature1", "path": "https://w.wallhaven.cc/full/nature1.jpg"}]}'
+        )
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        url = wchanger.fetch_wallhaven_url(category="space")
+        self.assertEqual(url, "https://w.wallhaven.cc/full/nature1.jpg")
+        called_request = mock_urlopen.call_args[0][0]
+        self.assertIn("q=space", called_request.full_url)
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_category_option(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI with -C / --category should pass category to run_online_wallpaper_cycle."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "--online", "wallhaven", "-C", "cyberpunk", "--no-repetition", "--no-config"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertEqual(mock_cycle.call_args.kwargs.get("category"), "cyberpunk")
+        self.assertEqual(mock_cycle.call_args.kwargs.get("provider"), "wallhaven")
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_category_implies_wallhaven(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI with -C should imply wallhaven online provider when none specified."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "-C", "nature", "--no-repetition", "--no-config"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertEqual(mock_cycle.call_args.kwargs.get("provider"), "wallhaven")
+        self.assertEqual(mock_cycle.call_args.kwargs.get("category"), "nature")
+
 
 if __name__ == "__main__":
     unittest.main()

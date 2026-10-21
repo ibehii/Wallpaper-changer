@@ -195,12 +195,12 @@ export default class WchangerPreferences extends ExtensionPreferences {
         // Group 4: Online Providers
         const onlineGroup = new Adw.PreferencesGroup({
             title: _('Online Source'),
-            description: _('Default provider when rotating online images.'),
+            description: _('Default provider and category when rotating online images.'),
         });
         page.add(onlineGroup);
 
         const providers = ['wallhaven', 'bing', 'picsum', 'loremflickr'];
-        const providerNames = [_('Wallhaven (Toplist)'), _('Bing Daily Photo'), _('Lorem Picsum (Random)'), _('LoremFlickr (Nature)')];
+        const providerNames = [_('Wallhaven'), _('Bing Daily Photo'), _('Lorem Picsum (Random)'), _('LoremFlickr (Nature)')];
         const stringList = Gtk.StringList.new(providerNames);
 
         const currentProvider = settings.get_string('default-provider') || 'wallhaven';
@@ -211,17 +211,104 @@ export default class WchangerPreferences extends ExtensionPreferences {
 
         const providerRow = new Adw.ComboRow({
             title: _('Default Online Provider'),
-            subtitle: _('Provider triggered when clicking Next Online in the panel menu.'),
+            subtitle: _('Online provider used for wallpaper rotation.'),
             model: stringList,
             selected: currentIndex,
         });
+
+        // Wallhaven Categories
+        const wallhavenCategories = [
+            { id: 'nature', name: _('Nature & Landscapes') },
+            { id: 'space', name: _('Space & Astronomy') },
+            { id: 'anime', name: _('Anime Artwork') },
+            { id: 'cyberpunk', name: _('Cyberpunk & Sci-Fi') },
+            { id: 'city', name: _('City & Architecture') },
+            { id: 'cars', name: _('Cars & Vehicles') },
+            { id: 'gaming', name: _('Gaming & Fantasy') },
+            { id: 'minimalism', name: _('Minimalism') },
+            { id: 'general', name: _('General Photography') },
+            { id: 'all', name: _('All (Random)') },
+        ];
+        const catNames = wallhavenCategories.map(c => c.name);
+        const catStringList = Gtk.StringList.new(catNames);
+
+        const currentCategory = settings.get_string('wallhaven-category') || 'nature';
+        let currentCatIndex = wallhavenCategories.findIndex(c => c.id === currentCategory);
+        if (currentCatIndex < 0) {
+            currentCatIndex = 0;
+        }
+
+        const categoryRow = new Adw.ComboRow({
+            title: _('Wallhaven Category'),
+            subtitle: _('Select image category or theme when Wallhaven is used.'),
+            model: catStringList,
+            selected: currentCatIndex,
+        });
+
+        const customCatRow = new Adw.EntryRow({
+            title: _('Custom Wallhaven Tag / Keyword'),
+            text: currentCategory,
+            show_apply_button: true,
+        });
+
+        let updatingCategory = false;
+        categoryRow.connect('notify::selected', (widget) => {
+            if (updatingCategory) return;
+            const selectedIdx = widget.selected;
+            if (selectedIdx >= 0 && selectedIdx < wallhavenCategories.length) {
+                const chosenCat = wallhavenCategories[selectedIdx].id;
+                updatingCategory = true;
+                settings.set_string('wallhaven-category', chosenCat);
+                customCatRow.set_text(chosenCat);
+                updatingCategory = false;
+            }
+        });
+
+        customCatRow.connect('apply', (entry) => {
+            if (updatingCategory) return;
+            const val = entry.get_text().trim().toLowerCase();
+            if (val.length > 0) {
+                updatingCategory = true;
+                settings.set_string('wallhaven-category', val);
+                const idx = wallhavenCategories.findIndex(c => c.id === val);
+                if (idx >= 0) {
+                    categoryRow.set_selected(idx);
+                }
+                updatingCategory = false;
+            }
+        });
+
+        settings.connect('changed::wallhaven-category', () => {
+            if (updatingCategory) return;
+            updatingCategory = true;
+            const newCat = settings.get_string('wallhaven-category') || 'nature';
+            customCatRow.set_text(newCat);
+            const idx = wallhavenCategories.findIndex(c => c.id === newCat);
+            if (idx >= 0) {
+                categoryRow.set_selected(idx);
+            }
+            updatingCategory = false;
+        });
+
+        const updateWallhavenSensitivity = (provider) => {
+            const isWallhaven = (provider === 'wallhaven');
+            categoryRow.set_sensitive(isWallhaven);
+            customCatRow.set_sensitive(isWallhaven);
+        };
+        updateWallhavenSensitivity(currentProvider);
+
         providerRow.connect('notify::selected', (widget) => {
             const selectedIdx = widget.selected;
             if (selectedIdx >= 0 && selectedIdx < providers.length) {
-                settings.set_string('default-provider', providers[selectedIdx]);
+                const prov = providers[selectedIdx];
+                settings.set_string('default-provider', prov);
+                updateWallhavenSensitivity(prov);
             }
         });
+
         onlineGroup.add(providerRow);
+        onlineGroup.add(categoryRow);
+        onlineGroup.add(customCatRow);
 
         // Group 5: Automatic Background Rotator
         const rotatorGroup = new Adw.PreferencesGroup({
