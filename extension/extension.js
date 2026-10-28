@@ -549,12 +549,6 @@ class WchangerIndicator extends PanelMenu.Button {
             localSubMenu.icon.icon_name = 'folder-pictures-symbolic';
         }
 
-        const rotateLocalItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Local Photo'), 'media-playlist-shuffle-symbolic');
-        rotateLocalItem.connect('activate', () => {
-            this._applyRandomLocalPhoto();
-        });
-        localSubMenu.menu.addMenuItem(rotateLocalItem);
-
         const isLocalActive = this._getStringSetting('wallpaper-source', 'local') === 'local';
         this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Use as Active Source'), isLocalActive);
         this._useLocalSourceSwitch.connect('toggled', (item, state) => {
