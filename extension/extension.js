@@ -371,6 +371,11 @@ class WchangerIndicator extends PanelMenu.Button {
                 if (this._useLocalSourceSwitch && this._useLocalSourceSwitch.state !== isLocal) {
                     this._useLocalSourceSwitch.setToggleState(isLocal);
                 }
+                this._updateWallhavenCategoryVisibility();
+            });
+
+            this._defaultProviderChangedId = this._settings.connect('changed::default-provider', () => {
+                this._updateWallhavenCategoryVisibility();
             });
         }
 
@@ -442,6 +447,21 @@ class WchangerIndicator extends PanelMenu.Button {
         return fallback;
     }
 
+    _updateWallhavenCategoryVisibility() {
+        if (!this._wallhavenSubMenu) return;
+        const source = this._getStringSetting('wallpaper-source', 'local');
+        const provider = this._getStringSetting('default-provider', 'wallhaven');
+        const isWallhavenActive = (source === 'online' && provider === 'wallhaven');
+
+        // Toggle actor visibility (handles both GTK/Clutter and GNOME Shell St.Widget wrappers)
+        if (typeof this._wallhavenSubMenu.visible !== 'undefined') {
+            this._wallhavenSubMenu.visible = isWallhavenActive;
+        }
+        if (this._wallhavenSubMenu.actor && typeof this._wallhavenSubMenu.actor.visible !== 'undefined') {
+            this._wallhavenSubMenu.actor.visible = isWallhavenActive;
+        }
+    }
+
     destroy() {
         if (this._rotatorTimerId) {
             GLib.Source.remove(this._rotatorTimerId);
@@ -459,6 +479,10 @@ class WchangerIndicator extends PanelMenu.Button {
             this._settings.disconnect(this._wallpaperSourceChangedId);
             this._wallpaperSourceChangedId = null;
         }
+        if (this._defaultProviderChangedId && this._settings) {
+            this._settings.disconnect(this._defaultProviderChangedId);
+            this._defaultProviderChangedId = null;
+        }
         if (this._bgChangedId && this._bgSettings) {
             this._bgSettings.disconnect(this._bgChangedId);
             this._bgChangedId = null;
@@ -469,6 +493,7 @@ class WchangerIndicator extends PanelMenu.Button {
         }
         this._bgSettings = null;
         this._settings = null;
+        this._wallhavenSubMenu = null;
         this._wallhavenMenuItems = null;
         super.destroy();
     }
@@ -622,10 +647,10 @@ class WchangerIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(sourcesSubMenu);
 
-        // Section 3b: Wallhaven Categories Submenu
-        const wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Wallhaven Categories'), true);
-        if (wallhavenSubMenu.icon) {
-            wallhavenSubMenu.icon.icon_name = 'view-grid-symbolic';
+        // Section 3b: Wallhaven Categories Submenu (conditionally visible when Wallhaven is active)
+        this._wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Wallhaven Categories'), true);
+        if (this._wallhavenSubMenu.icon) {
+            this._wallhavenSubMenu.icon.icon_name = 'view-grid-symbolic';
         }
 
         const wallhavenCategories = [
@@ -655,7 +680,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 this._runWchangerCommand(args);
             });
             this._wallhavenMenuItems.push(item);
-            wallhavenSubMenu.menu.addMenuItem(item);
+            this._wallhavenSubMenu.menu.addMenuItem(item);
         });
 
         const updateWallhavenMenuOrnaments = () => {
@@ -673,13 +698,14 @@ class WchangerIndicator extends PanelMenu.Button {
         // Initialize checkmarks immediately
         updateWallhavenMenuOrnaments();
 
-        wallhavenSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
+        this._wallhavenSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
             if (isOpen) {
                 updateWallhavenMenuOrnaments();
             }
         });
 
-        this.menu.addMenuItem(wallhavenSubMenu);
+        this.menu.addMenuItem(this._wallhavenSubMenu);
+        this._updateWallhavenCategoryVisibility();
 
         // Section 3c: Multi-Monitor Quick Action
         const multiMonItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Multi-Monitor'), 'video-display-symbolic');
