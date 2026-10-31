@@ -447,6 +447,17 @@ class WchangerIndicator extends PanelMenu.Button {
         return fallback;
     }
 
+    _ensureRotatorEnabled() {
+        if (!this._getBooleanSetting('rotator-enabled', false)) {
+            this._setBooleanSetting('rotator-enabled', true);
+            if (this._serviceSwitch && !this._serviceSwitch.state) {
+                this._serviceSwitch.setToggleState(true);
+            }
+            this._startRotatorTimer();
+            this._controlSystemdService('start');
+        }
+    }
+
     _updateWallhavenCategoryVisibility() {
         if (!this._wallhavenSubMenu) return;
         const source = this._getStringSetting('wallpaper-source', 'local');
@@ -551,6 +562,7 @@ class WchangerIndicator extends PanelMenu.Button {
 
         this._nextItem = new PopupMenu.PopupImageMenuItem(this._gettext('Next Wallpaper'), 'media-skip-forward-symbolic');
         this._nextItem.connect('activate', () => {
+            this._ensureRotatorEnabled();
             if (this._historyManager.canGoForward()) {
                 const nextWallpaper = this._historyManager.getNext();
                 this._applyWallpaper(nextWallpaper);
@@ -578,6 +590,9 @@ class WchangerIndicator extends PanelMenu.Button {
         this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Use as Active Source'), isLocalActive);
         this._useLocalSourceSwitch.connect('toggled', (item, state) => {
             this._setStringSetting('wallpaper-source', state ? 'local' : 'online');
+            if (state) {
+                this._ensureRotatorEnabled();
+            }
         });
         localSubMenu.menu.addMenuItem(this._useLocalSourceSwitch);
 
@@ -632,6 +647,7 @@ class WchangerIndicator extends PanelMenu.Button {
             item.connect('activate', () => {
                 this._setStringSetting('wallpaper-source', 'online');
                 this._setStringSetting('default-provider', p.key);
+                this._ensureRotatorEnabled();
                 const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', p.key, '--no-repetition'];
                 if (p.key === 'wallhaven') {
@@ -674,6 +690,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 this._setStringSetting('wallpaper-source', 'online');
                 this._setStringSetting('default-provider', 'wallhaven');
                 this._setStringSetting('wallhaven-category', cat.key);
+                this._ensureRotatorEnabled();
                 const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', 'wallhaven', '-C', cat.key, '--no-repetition'];
                 if (multiMon) args.push('-m');
@@ -710,6 +727,7 @@ class WchangerIndicator extends PanelMenu.Button {
         // Section 3c: Multi-Monitor Quick Action
         const multiMonItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Multi-Monitor'), 'video-display-symbolic');
         multiMonItem.connect('activate', () => {
+            this._ensureRotatorEnabled();
             const source = this._getStringSetting('wallpaper-source', 'local');
             if (source === 'local') {
                 const localDir = this._getLocalPhotosDirectory();
