@@ -1505,6 +1505,7 @@ def download_online_wallpaper(
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     request = Request(image_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
     chunk_size = 64 * 1024
+    max_allowed_bytes = 50 * 1024 * 1024  # 50 MB upper bound to prevent resource exhaustion / decompression bombs
     last_network_error: Exception | None = None
 
     for attempt in range(max_retries):
@@ -1518,6 +1519,11 @@ def download_online_wallpaper(
                             break
                         destination_file.write(chunk)
                         bytes_written += len(chunk)
+                        if bytes_written > max_allowed_bytes:
+                            destination_path.unlink(missing_ok=True)
+                            raise ValueError(
+                                f"Remote image exceeded maximum allowed size limit ({max_allowed_bytes // (1024 * 1024)}MB)."
+                            )
                 if bytes_written == 0:
                     destination_path.unlink(missing_ok=True)
                     raise ValueError("Received empty image content from provider.")
