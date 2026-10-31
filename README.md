@@ -11,7 +11,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20(6%20Desktops)-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=open-source-initiative&logoColor=white)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-215%20Passing-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-232%20Passing-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
 [![Architecture](https://img.shields.io/badge/Architecture-Wayland%20%7C%20X11-blueviolet?style=for-the-badge&logo=gnome&logoColor=white)](#desktop-environments-matrix)
 
 <br/>
@@ -273,6 +273,9 @@ If you use GNOME Shell (45–51+), install the native top-panel extension with *
 # 1. Install & compile schemas locally
 make install-extension
 
+# Or package for extensions.gnome.org (EGO) / zip distribution:
+make pack-extension
+
 # 2. Reload GNOME Shell:
 #    - Wayland: Log out and log back in
 #    - X11: Press Alt+F2, type 'r', and press Enter
@@ -338,7 +341,8 @@ wchanger --install-autostart
 
 [+] Enter pause duration between changing wallpapers [60]: 5m
 [+] Enter path to directory containing wallpapers [~/Pictures/wallpapers]: 
-[i] Generated systemd service definition for user 'user':
+[i] Generated user systemd service definition for user 'user':
+    Path: /home/user/.config/systemd/user/wallpaper-changer.service
     Command: /usr/bin/python3 /bin/wchanger -p 300 -o log /home/user/Pictures/wallpapers
     Logging: log (info.log)
 
@@ -348,18 +352,20 @@ wchanger --install-autostart
 
 ### Managing the Service:
 
+Because `wchanger` uses unprivileged systemd user services, no root (`sudo`) permissions are required:
+
 ```bash
 # Check service status
-sudo systemctl status wallpaper-changer.service
+systemctl --user status wallpaper-changer.service
 
 # Stop the service
-sudo systemctl stop wallpaper-changer.service
+systemctl --user stop wallpaper-changer.service
 
 # Restart the service
-sudo systemctl restart wallpaper-changer.service
+systemctl --user restart wallpaper-changer.service
 
 # Disable from starting automatically
-sudo systemctl disable wallpaper-changer.service
+systemctl --user disable wallpaper-changer.service
 ```
 
 ---

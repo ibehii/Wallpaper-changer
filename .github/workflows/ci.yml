@@ -42,3 +42,30 @@ jobs:
       - name: Test CLI binary command
         run: |
           wchanger --help
+
+  extension-check:
+    name: GNOME Extension Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GLib & GNOME Shell toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-bin gnome-shell
+
+      - name: Validate GSettings Schemas
+        run: |
+          glib-compile-schemas --strict extension/schemas/
+
+      - name: Validate JavaScript Syntax
+        run: |
+          node --check extension/extension.js
+          node --check extension/prefs.js
+
+      - name: Test GNOME Extension Packaging
+        run: |
+          make pack-extension
+          test -f dist/wchanger@ibehii.github.com.shell-extension.zip
+

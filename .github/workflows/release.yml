@@ -26,8 +26,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install build
 
+      - name: Install GNOME extension packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-bin gnome-shell
+
       - name: Build wheel and source distribution
         run: python -m build
+
+      - name: Package GNOME Shell extension
+        run: make pack-extension
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -373,8 +373,9 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertEqual(exception_context.exception.code, 0)
 
         # First subprocess call is sudo tee to write the service definition
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--kde", written_service_content)
         self.assertIn("-p 45", written_service_content)
 
@@ -401,8 +402,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--kde", written_service_content)
 
     def test_cli_help_includes_kde(self) -> None:
@@ -544,8 +546,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="kde")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn(shlex.quote(str(folder_with_spaces.resolve())), written_service_content)
 
     @patch("sys.stdin.isatty", return_value=True)
@@ -574,8 +577,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--kde", written_service_content)
 
     @patch("sys.stdin.isatty", return_value=False)
@@ -1109,8 +1113,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="xfce")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--xfce", written_service_content)
 
     @patch("shutil.which")
@@ -1131,8 +1136,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="mate")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--mate", written_service_content)
 
     @patch("shutil.which")
@@ -1153,8 +1159,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="lxqt")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--lxqt", written_service_content)
 
     @patch("shutil.which")
@@ -1180,8 +1187,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--xfce", written_service_content)
 
     @patch("sys.stdin.isatty", return_value=True)
@@ -1209,8 +1217,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--mate", written_service_content)
 
     @patch("shutil.which")
@@ -1236,8 +1245,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--mate", written_service_content)
 
     @patch("shutil.which")
@@ -1263,8 +1273,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--lxqt", written_service_content)
 
     def test_resolve_to_file_path_with_unencoded_hash_and_query(self) -> None:
@@ -1364,8 +1375,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--xfce", written_service_content)
 
     @patch("sys.stdin.isatty", return_value=True)
@@ -1393,8 +1405,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start()
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--lxqt", written_service_content)
 
     @patch("shutil.which")
@@ -1416,8 +1429,9 @@ class TestWallpaperChanger(unittest.TestCase):
                 wchanger.setup_auto_start(desktop_override="lxqt")
             self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("WorkingDirectory=", written_service_content)
         self.assertIn("Environment=DISPLAY=:1", written_service_content)
         self.assertIn("Environment=WAYLAND_DISPLAY=wayland-0", written_service_content)
@@ -1440,8 +1454,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="xfce", color_theme="dark")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertNotIn("-t dark", written_service_content)
 
     @patch("shutil.which")
@@ -1462,8 +1477,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="gnome", color_theme="dark")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("-t dark", written_service_content)
 
     @patch("time.sleep")
@@ -1874,8 +1890,9 @@ class TestWallpaperChanger(unittest.TestCase):
             wchanger.setup_auto_start(desktop_override="gnome", online_provider="bing")
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("--online bing", written_service_content)
         self.assertIn("--gnome", written_service_content)
 
@@ -2092,8 +2109,9 @@ class TestWallpaperChanger(unittest.TestCase):
             )
         self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        service_file = Path.home() / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        self.assertTrue(service_file.exists())
+        written_service_content = service_file.read_text(encoding="utf-8")
         self.assertIn("-s", written_service_content)
         self.assertIn("-R", written_service_content)
 
@@ -2411,18 +2429,22 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_prompt.return_value = 60
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as exception_context:
-            wchanger.setup_install_autostart_service(
-                desktop_override="gnome",
-                online_provider="wallhaven",
-                keep_last=12,
-            )
-        self.assertEqual(exception_context.exception.code, 0)
+        fake_service_file = self.test_dir / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        with patch("pathlib.Path.home", return_value=self.test_dir):
+            with self.assertRaises(SystemExit) as exception_context:
+                wchanger.setup_install_autostart_service(
+                    desktop_override="gnome",
+                    online_provider="wallhaven",
+                    keep_last=12,
+                )
+            self.assertEqual(exception_context.exception.code, 0)
 
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        self.assertTrue(fake_service_file.exists())
+        written_service_content = fake_service_file.read_text(encoding="utf-8")
         self.assertIn("--online wallhaven", written_service_content)
         self.assertIn("--keep-last 12", written_service_content)
+        self.assertEqual(mock_run.call_args_list[0][0][0], ["systemctl", "--user", "daemon-reload"])
+        self.assertEqual(mock_run.call_args_list[1][0][0], ["systemctl", "--user", "enable", "--now", "wallpaper-changer.service"])
 
     @patch("wchanger.cleanup_download_cache")
     @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "Success"))
@@ -2741,15 +2763,17 @@ class TestWallpaperChanger(unittest.TestCase):
         mock_prompt.return_value = 60
         mock_run.return_value = MagicMock(returncode=0)
 
-        with self.assertRaises(SystemExit) as exception_context:
-            wchanger.setup_install_autostart_service(
-                desktop_override="kde",
-                online_provider="wallhaven",
-                multi_monitor=True,
-            )
-        self.assertEqual(exception_context.exception.code, 0)
-        tee_call = mock_run.call_args_list[0]
-        written_service_content = tee_call.kwargs["input"].decode("utf-8")
+        fake_service_file = self.test_dir / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        with patch("pathlib.Path.home", return_value=self.test_dir):
+            with self.assertRaises(SystemExit) as exception_context:
+                wchanger.setup_install_autostart_service(
+                    desktop_override="kde",
+                    online_provider="wallhaven",
+                    multi_monitor=True,
+                )
+            self.assertEqual(exception_context.exception.code, 0)
+        self.assertTrue(fake_service_file.exists())
+        written_service_content = fake_service_file.read_text(encoding="utf-8")
         self.assertIn("--multi-monitor", written_service_content)
 
     def test_cli_single_monitor_overrides_config(self) -> None:
@@ -3283,28 +3307,6 @@ class TestWallpaperChanger(unittest.TestCase):
     @patch("shutil.which", return_value="/usr/bin/systemctl")
     @patch("click.prompt")
     @patch("subprocess.run")
-    def test_setup_install_autostart_includes_wayland_session_type(
-        self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
-    ) -> None:
-        """setup_install_autostart_service should forward XDG_SESSION_TYPE to systemd service."""
-        mock_prompt.return_value = 60
-        mock_run.return_value = MagicMock(returncode=0)
-
-        with patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland"}):
-            with self.assertRaises(SystemExit) as exception_context:
-                wchanger.setup_install_autostart_service(
-                    desktop_override="gnome",
-                    online_provider="wallhaven",
-                )
-            self.assertEqual(exception_context.exception.code, 0)
-
-        tee_invocation = mock_run.call_args_list[0]
-        service_text = tee_invocation.kwargs["input"].decode("utf-8")
-        self.assertIn("Environment=XDG_SESSION_TYPE=wayland", service_text)
-
-    @patch("shutil.which", return_value="/usr/bin/systemctl")
-    @patch("click.prompt")
-    @patch("subprocess.run")
     def test_setup_install_autostart_includes_desktop_and_session(
         self, mock_run: MagicMock, mock_prompt: MagicMock, mock_which: MagicMock
     ) -> None:
@@ -3317,7 +3319,8 @@ class TestWallpaperChanger(unittest.TestCase):
             "DESKTOP_SESSION": "gnome",
             "PATH": "/usr/local/bin:/usr/bin:/bin",
         }
-        with patch.dict(os.environ, session_environment):
+        fake_service_file = self.test_dir / ".config" / "systemd" / "user" / "wallpaper-changer.service"
+        with patch.dict(os.environ, session_environment), patch("pathlib.Path.home", return_value=self.test_dir):
             with self.assertRaises(SystemExit) as exception_context:
                 wchanger.setup_install_autostart_service(
                     desktop_override="gnome",
@@ -3325,8 +3328,8 @@ class TestWallpaperChanger(unittest.TestCase):
                 )
             self.assertEqual(exception_context.exception.code, 0)
 
-        tee_invocation = mock_run.call_args_list[0]
-        service_text = tee_invocation.kwargs["input"].decode("utf-8")
+        self.assertTrue(fake_service_file.exists())
+        service_text = fake_service_file.read_text(encoding="utf-8")
         self.assertIn("Environment=XDG_CURRENT_DESKTOP=GNOME", service_text)
         self.assertIn("Environment=DESKTOP_SESSION=gnome", service_text)
         self.assertIn("Environment=PATH=/usr/local/bin:/usr/bin:/bin", service_text)

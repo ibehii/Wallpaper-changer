@@ -2285,74 +2285,58 @@ def setup_install_autostart_service(
     except Exception:
         current_username = os.environ.get("USER", "root")
 
-    current_uid = os.getuid()
-    current_display = os.environ.get("DISPLAY", ":0")
     script_dir = str(Path(__file__).resolve().parent)
     service_filename = "wallpaper-changer.service"
-    destination_service_path = f"/etc/systemd/system/{service_filename}"
+    user_systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    destination_service_path = user_systemd_dir / service_filename
 
     extra_environment_lines = []
+    if "PATH" in os.environ:
+        extra_environment_lines.append(f"Environment=PATH={os.environ['PATH']}")
+    if "DISPLAY" in os.environ:
+        extra_environment_lines.append(f"Environment=DISPLAY={os.environ['DISPLAY']}")
     if "WAYLAND_DISPLAY" in os.environ:
         extra_environment_lines.append(f"Environment=WAYLAND_DISPLAY={os.environ['WAYLAND_DISPLAY']}")
-    if "XAUTHORITY" in os.environ:
-        extra_environment_lines.append(f"Environment=XAUTHORITY={os.environ['XAUTHORITY']}")
-    if "XDG_SESSION_TYPE" in os.environ:
-        extra_environment_lines.append(f"Environment=XDG_SESSION_TYPE={os.environ['XDG_SESSION_TYPE']}")
     if "XDG_CURRENT_DESKTOP" in os.environ:
         extra_environment_lines.append(f"Environment=XDG_CURRENT_DESKTOP={os.environ['XDG_CURRENT_DESKTOP']}")
     if "DESKTOP_SESSION" in os.environ:
         extra_environment_lines.append(f"Environment=DESKTOP_SESSION={os.environ['DESKTOP_SESSION']}")
-    if "PATH" in os.environ:
-        extra_environment_lines.append(f"Environment=PATH={os.environ['PATH']}")
     extra_environment_block = ("\n" + "\n".join(extra_environment_lines)) if extra_environment_lines else ""
 
     service_definition = f"""[Unit]
 Description=Anahita Wallpaper Changer Service
-After=graphical.target
+After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
-User={current_username}
-WorkingDirectory={script_dir}
-Environment=XDG_RUNTIME_DIR=/run/user/{current_uid}
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{current_uid}/bus
-Environment=DISPLAY={current_display}{extra_environment_block}
+WorkingDirectory={script_dir}{extra_environment_block}
 ExecStart={full_exec_command}
 Restart=on-failure
 RestartSec=10
 
 [Install]
-WantedBy=graphical.target
+WantedBy=default.target
 """
 
     click.secho(
-        f"\n[i] Generated systemd service definition for user '{current_username}':\n"
+        f"\n[i] Generated user systemd service definition for '{current_username}':\n"
+        f"    Target:  {destination_service_path}\n"
         f"    Command: {full_exec_command}\n"
         f"    Logging: {output_mode} (info.log)\n",
         fg="cyan",
     )
 
-    click.secho(
-        f"[i] Requesting root permissions via sudo to install and enable '{service_filename}'...",
-        fg="yellow",
-        bold=True,
-    )
-
-    # Secure installation: pipe content directly to sudo tee, avoiding insecure /tmp files
-    write_result = subprocess.run(
-        ["sudo", "tee", destination_service_path],
-        input=service_definition.encode("utf-8"),
-        stdout=subprocess.DEVNULL,
-        check=False,
-    )
-    if write_result.returncode != 0:
-        click.secho(f"\n[!] Failed to write service file to {destination_service_path}", fg="red", err=True)
+    try:
+        user_systemd_dir.mkdir(parents=True, exist_ok=True)
+        destination_service_path.write_text(service_definition, encoding="utf-8")
+    except OSError as error:
+        click.secho(f"\n[!] Failed to write service file to {destination_service_path}: {error}", fg="red", err=True)
         show_auto_start_failure_and_exit()
 
     setup_commands = [
-        ["sudo", "chmod", "644", destination_service_path],
-        ["sudo", "systemctl", "daemon-reload"],
-        ["sudo", "systemctl", "enable", "--now", service_filename],
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "enable", "--now", service_filename],
     ]
 
     for setup_command in setup_commands:
@@ -2362,11 +2346,11 @@ WantedBy=graphical.target
             show_auto_start_failure_and_exit()
 
     click.secho(
-        f"\n[+] Successfully installed and activated '{service_filename}'!\n"
-        f"[+] The service will now run automatically on login.\n"
-        f"[+] View status: sudo systemctl status {service_filename}\n"
-        f"[+] Stop service: sudo systemctl stop {service_filename}\n"
-        f"[+] Disable:     sudo systemctl disable {service_filename}\n",
+        f"\n[+] Successfully installed and activated '{service_filename}' (user service)!\n"
+        f"[+] The service will now run automatically on login without requiring root/sudo.\n"
+        f"[+] View status: systemctl --user status {service_filename}\n"
+        f"[+] Stop service: systemctl --user stop {service_filename}\n"
+        f"[+] Disable:     systemctl --user disable {service_filename}\n",
         fg="green",
         bold=True,
     )
