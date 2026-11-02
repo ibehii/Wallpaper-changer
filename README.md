@@ -4,16 +4,20 @@
   <img src="photos/anahita_banner.png" width="640" alt="Anahita Wallpaper Changer Banner" />
 </p>
 
-# Anahita Wallpaper Changer (`wchanger`)
+# 🌊 Anahita Wallpaper Changer (`wchanger`)
+### *The Ultimate Autonomous Wallpaper Rotator & Multi-Monitor Engine for Linux*
 
 **A lightweight, zero-dependency wallpaper rotation daemon and CLI for Linux.**  
 Supports multi-monitor independent wallpapers, curated online photo streams, systemd user services, and a companion GNOME Shell extension.
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://www.kernel.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square&logo=open-source-initiative&logoColor=white)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-244%20Passing-brightgreen?style=flat-square&logo=pytest&logoColor=white)](tests/)
-[![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--48-blueviolet?style=flat-square&logo=gnome&logoColor=white)](extension/)
+<br/>
+
+[![Release](https://img.shields.io/badge/Release-v3.1.0--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20(6%20Desktops)-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
+[![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=open-source-initiative&logoColor=white)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-244%20Passing-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--48-blueviolet?style=for-the-badge&logo=gnome&logoColor=white)](extension/)
 
 <br/>
 
@@ -23,43 +27,129 @@ Supports multi-monitor independent wallpapers, curated online photo streams, sys
   <img src="photos/wallpaer3.jpg" width="31%" alt="Sample Wallpaper 3" />
 </p>
 
-</div>
+*Sample bundled high-definition wallpapers dynamically managed by `wchanger`.*
 
 ---
 
-## Table of Contents
+### 🗺️ Quick Navigation
 
-- [Why wchanger?](#why-wchanger)
-- [Quick Start](#quick-start)
-- [Supported Desktops & Prerequisites](#supported-desktops--prerequisites)
-- [Installation](#installation)
-- [Tutorial 1: Local Wallpaper Folders](#tutorial-1-local-wallpaper-folders)
-- [Tutorial 2: Multi-Monitor Setups](#tutorial-2-multi-monitor-setups)
-- [Tutorial 3: Online Wallpaper Providers](#tutorial-3-online-wallpaper-providers)
-  - [Unsplash Setup (API Key & Categories)](#unsplash-setup-api-key--categories)
-  - [Wallhaven Toplists & Topics](#wallhaven-toplists--topics)
-  - [Cache Management & Prefetching](#cache-management--prefetching)
-- [Tutorial 4: Background Service & Login Autostart](#tutorial-4-background-service--login-autostart)
-- [Tutorial 5: GNOME Shell Companion Extension](#tutorial-5-gnome-shell-companion-extension)
-- [Configuration Reference (`config.toml`)](#configuration-reference-configtoml)
-- [CLI Reference](#cli-reference)
-- [Troubleshooting & FAQ](#troubleshooting--faq)
-- [Development & Contributing](#development--contributing)
-- [License](#license)
+<table>
+  <tr>
+    <td align="center" width="25%">
+      <a href="#why-wchanger">
+        <font size="6">💡</font><br/>
+        <b>Why wchanger?</b><br/>
+        <sub>Zero-dependency Linux daemon</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#quick-start">
+        <font size="6">🚀</font><br/>
+        <b>Quick Start</b><br/>
+        <sub>Get started in 60 seconds</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#supported-desktops--prerequisites">
+        <font size="6">🖥️</font><br/>
+        <b>Supported Desktops</b><br/>
+        <sub>GNOME, KDE, XFCE & more</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#installation">
+        <font size="6">📦</font><br/>
+        <b>Installation</b><br/>
+        <sub>Pip, /bin, or run from source</sub>
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="25%">
+      <a href="#tutorial-1-local-wallpaper-folders">
+        <font size="6">📁</font><br/>
+        <b>Local Folders</b><br/>
+        <sub>Intervals, shuffle, & themes</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#tutorial-2-multi-monitor-setups">
+        <font size="6">🖥️🖥️</font><br/>
+        <b>Multi-Monitor</b><br/>
+        <sub>Independent wallpaper per screen</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#tutorial-3-online-wallpaper-providers">
+        <font size="6">🌐</font><br/>
+        <b>Online Providers</b><br/>
+        <sub>Unsplash, Wallhaven, Bing</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#tutorial-4-background-service--login-autostart">
+        <font size="6">⏰</font><br/>
+        <b>Autostart Service</b><br/>
+        <sub>Systemd user login service</sub>
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="25%">
+      <a href="#tutorial-5-gnome-shell-companion-extension">
+        <font size="6">🧩</font><br/>
+        <b>GNOME Extension</b><br/>
+        <sub>Top bar controls & quick menu</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#configuration-reference-configtoml">
+        <font size="6">⚙️</font><br/>
+        <b>Configuration</b><br/>
+        <sub>Persistent config.toml options</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#cli-reference">
+        <font size="6">⌨️</font><br/>
+        <b>CLI Reference</b><br/>
+        <sub>Command-line flags & options</sub>
+      </a>
+    </td>
+    <td align="center" width="25%">
+      <a href="#troubleshooting--faq">
+        <font size="6">🔍</font><br/>
+        <b>Troubleshooting</b><br/>
+        <sub>Common issues & solutions</sub>
+      </a>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub>
+    <b>Additional Resources:</b>&nbsp;
+    <a href="#unsplash-setup-api-key--categories">🔑 Unsplash Setup Guide</a> &nbsp;•&nbsp;
+    <a href="#development--contributing">🛠️ Development & Contributing</a> &nbsp;•&nbsp;
+    <a href="#license">📄 MIT License</a>
+  </sub>
+</p>
+
+</div>
 
 ---
 
 ## Why wchanger?
 
-Most wallpaper rotators for Linux either depend on heavy GUI runtimes, support only a single desktop environment, or duplicate the same image across multiple monitors.
+Most wallpaper rotators for Linux either depend on heavy GUI runtimes, support only a single desktop environment, or duplicate the same image across multiple monitors. `wchanger` addresses these limitations with native desktop hooks, zero daemon bloat, and full multi-monitor precision:
 
-`wchanger` addresses these limitations:
-
-- **Native Desktop Integration:** Communicates directly with desktop configuration systems (`gsettings`, `qdbus`, `xfconf-query`, `pcmanfm-qt`) without requiring third-party root daemons.
-- **True Multi-Monitor Support:** Displays distinct, non-duplicate images on each screen using native screen containments or high-resolution canvas stitching with Pillow.
-- **Curated Online Streaming:** Fetches high-resolution images from Unsplash, Wallhaven, Bing Daily, Picsum, and LoremFlickr with automatic cache pruning.
-- **Unprivileged Autostart:** Installs as a systemd user service (`systemctl --user`), running entirely within your session without root privileges.
-- **Zero Configuration Necessary:** Works immediately out of the box with auto-detected desktops, while allowing full customization via `config.toml` or CLI flags.
+| Capability | How `wchanger` Delivers It | Highlight |
+| :--- | :--- | :---: |
+| **Native Desktop Integration** | Communicates directly with desktop configuration systems (`gsettings`, `qdbus`, `xfconf-query`, `pcmanfm-qt`). | 🐧 Zero external desktop tools |
+| **True Multi-Monitor Engine** | Displays distinct, non-duplicate images on each screen using native containments or high-res Pillow canvas stitching. | 🖥️ Native & Spanned modes |
+| **Curated Online Streaming** | Fetches high-resolution images from Unsplash, Wallhaven, Bing Daily, Picsum, and LoremFlickr with automatic cache pruning. | 🌐 Unlimited fresh streams |
+| **Unprivileged Autostart** | Installs as an unprivileged systemd user service (`systemctl --user`), running within your session without root privileges. | 🔄 Start on sign-in |
+| **Zero Configuration Required** | Works immediately out of the box with auto-detected desktops, while allowing full customization via `config.toml` or CLI. | ⚙️ Zero-typing workflow |
 
 ---
 
