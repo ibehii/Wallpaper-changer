@@ -4,355 +4,430 @@
   <img src="photos/anahita_banner.png" width="640" alt="Anahita Wallpaper Changer Banner" />
 </p>
 
-# 🌊 Anahita Wallpaper Changer (`wchanger`)
-### *The Ultimate Autonomous Wallpaper Rotator & Multi-Monitor Engine for Linux*
+# Anahita Wallpaper Changer (`wchanger`)
 
-[![Release](https://img.shields.io/badge/Release-v3.0.3--Aredvi_Sura_Anahita-purple?style=for-the-badge&logo=git&logoColor=white)](https://github.com/ibehii/Wallpaper-changer/releases)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20(6%20Desktops)-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
-[![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=open-source-initiative&logoColor=white)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-232%20Passing-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
-[![Architecture](https://img.shields.io/badge/Architecture-Wayland%20%7C%20X11-blueviolet?style=for-the-badge&logo=gnome&logoColor=white)](#desktop-environments-matrix)
+**A lightweight, zero-dependency wallpaper rotation daemon and CLI for Linux.**  
+Supports multi-monitor independent wallpapers, curated online photo streams, systemd user services, and a companion GNOME Shell extension.
+
+[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square&logo=linux&logoColor=black)](https://www.kernel.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square&logo=open-source-initiative&logoColor=white)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-244%20Passing-brightgreen?style=flat-square&logo=pytest&logoColor=white)](tests/)
+[![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--48-blueviolet?style=flat-square&logo=gnome&logoColor=white)](extension/)
 
 <br/>
 
 <p align="center">
-  <img src="photos/wallpaer1.png" width="31%" alt="Cosmic Landscape" />
-  <img src="photos/wallpaer2.jpg" width="31%" alt="Serene River Forest" />
-  <img src="photos/wallpaer3.jpg" width="31%" alt="Winter Mountain Pines" />
+  <img src="photos/wallpaer1.png" width="31%" alt="Sample Wallpaper 1" />
+  <img src="photos/wallpaer2.jpg" width="31%" alt="Sample Wallpaper 2" />
+  <img src="photos/wallpaer3.jpg" width="31%" alt="Sample Wallpaper 3" />
 </p>
-
-*Sample bundled high-definition wallpapers dynamically managed by `wchanger`.*
-
----
-
-### 🌟 Introduction
-
-> **Transform your Linux desktop experience.**
-> 
-> **Anahita Wallpaper Changer** is a lightweight, zero-bloat CLI application and system background daemon built specifically for Linux. It continuously rotates high-resolution wallpapers across **all major Linux Desktop Environments** (**GNOME**, **Cinnamon**, **KDE Plasma 5 & 6**, **XFCE**, **MATE**, and **LXQt**) with native integration, true **multi-monitor independent displays**, curated **online wallpaper providers**, persistent **TOML configuration**, and automated **systemd login service installation**.
-
----
-
-### 🗺️ Quick Navigation
-
-<table>
-  <tr>
-    <td align="center" width="20%">
-      <a href="#-quick-start">
-        <font size="6">🚀</font><br/>
-        <b>Quick Start</b><br/>
-        <sub>Get started in 30 seconds</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-key-features">
-        <font size="6">✨</font><br/>
-        <b>Key Features</b><br/>
-        <sub>Everything wchanger can do</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-desktop-environments-matrix">
-        <font size="6">🖥️</font><br/>
-        <b>Desktop Support</b><br/>
-        <sub>GNOME, KDE, XFCE & more</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-multi-monitor-support">
-        <font size="6">🖥️🖥️</font><br/>
-        <b>Multi-Monitor</b><br/>
-        <sub>Different image per screen</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-start-at-login-systemd">
-        <font size="6">⏰</font><br/>
-        <b>Start at Login</b><br/>
-        <sub>Systemd startup service</sub>
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="20%">
-      <a href="#-installation">
-        <font size="6">📦</font><br/>
-        <b>Installation</b><br/>
-        <sub>Install to /bin & system PATH</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-online-wallpaper-sources">
-        <font size="6">🌐</font><br/>
-        <b>Online Sources</b><br/>
-        <sub>Wallhaven, Bing, Picsum</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-configuration-file-configtoml">
-        <font size="6">⚙️</font><br/>
-        <b>Configuration</b><br/>
-        <sub>Zero-typing config.toml</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-cli-reference">
-        <font size="6">ℹ️</font><br/>
-        <b>Change Settings</b><br/>
-        <sub>Via config or CLI flags</sub>
-      </a>
-    </td>
-    <td align="center" width="20%">
-      <a href="#-troubleshooting">
-        <font size="6">🔍</font><br/>
-        <b>Troubleshooting</b><br/>
-        <sub>Fix common desktop issues</sub>
-      </a>
-    </td>
-  </tr>
-</table>
 
 </div>
 
 ---
 
-<a id="-quick-start"></a>
-## 🚀 Quick Start
+## Table of Contents
 
-Get your desktop cycling in seconds:
+- [Why wchanger?](#why-wchanger)
+- [Quick Start](#quick-start)
+- [Supported Desktops & Prerequisites](#supported-desktops--prerequisites)
+- [Installation](#installation)
+- [Tutorial 1: Local Wallpaper Folders](#tutorial-1-local-wallpaper-folders)
+- [Tutorial 2: Multi-Monitor Setups](#tutorial-2-multi-monitor-setups)
+- [Tutorial 3: Online Wallpaper Providers](#tutorial-3-online-wallpaper-providers)
+  - [Unsplash Setup (API Key & Categories)](#unsplash-setup-api-key--categories)
+  - [Wallhaven Toplists & Topics](#wallhaven-toplists--topics)
+  - [Cache Management & Prefetching](#cache-management--prefetching)
+- [Tutorial 4: Background Service & Login Autostart](#tutorial-4-background-service--login-autostart)
+- [Tutorial 5: GNOME Shell Companion Extension](#tutorial-5-gnome-shell-companion-extension)
+- [Configuration Reference (`config.toml`)](#configuration-reference-configtoml)
+- [CLI Reference](#cli-reference)
+- [Troubleshooting & FAQ](#troubleshooting--faq)
+- [Development & Contributing](#development--contributing)
+- [License](#license)
+
+---
+
+## Why wchanger?
+
+Most wallpaper rotators for Linux either depend on heavy GUI runtimes, support only a single desktop environment, or duplicate the same image across multiple monitors.
+
+`wchanger` addresses these limitations:
+
+- **Native Desktop Integration:** Communicates directly with desktop configuration systems (`gsettings`, `qdbus`, `xfconf-query`, `pcmanfm-qt`) without requiring third-party root daemons.
+- **True Multi-Monitor Support:** Displays distinct, non-duplicate images on each screen using native screen containments or high-resolution canvas stitching with Pillow.
+- **Curated Online Streaming:** Fetches high-resolution images from Unsplash, Wallhaven, Bing Daily, Picsum, and LoremFlickr with automatic cache pruning.
+- **Unprivileged Autostart:** Installs as a systemd user service (`systemctl --user`), running entirely within your session without root privileges.
+- **Zero Configuration Necessary:** Works immediately out of the box with auto-detected desktops, while allowing full customization via `config.toml` or CLI flags.
+
+---
+
+## Quick Start
+
+Get wallpaper rotation running in under 60 seconds:
+
+### 1. Install `wchanger`
 
 ```bash
-# 1. Install wchanger as a system command into /bin (one command)
-sudo ./install.sh
+# Clone the repository
+git clone https://github.com/ibehii/Wallpaper-changer.git
+cd Wallpaper-changer
 
-# 2. Run immediately with auto-detection and default wallpapers
-wchanger
+# Install to your user environment
+pip install --user .
+```
 
-# 3. Or rotate wallpapers from your own folder every 5 minutes
-wchanger -p 5m ~/Pictures/Wallpapers
+Ensure `~/.local/bin` is in your `PATH` (typically default on modern distributions).
 
-# 4. Or fetch daily curated Bing photos across all your monitors
-wchanger -m --online bing
+### 2. Set Your First Wallpaper
+
+```bash
+# Rotate through bundled wallpapers once and exit
+wchanger --no-repetition
+```
+
+### 3. Start Rotating a Local Folder
+
+```bash
+# Rotate images from ~/Pictures/Wallpapers every 10 minutes in the background
+wchanger -p 10m -s -b ~/Pictures/Wallpapers
+```
+
+### 4. Or Stream Online Wallpapers
+
+```bash
+# Stream fresh nature wallpapers from Wallhaven every 15 minutes
+wchanger --online wallhaven -C nature -p 15m -b
 ```
 
 ---
 
-<a id="-key-features"></a>
-## ✨ Key Features
+## Supported Desktops & Prerequisites
 
-| Feature | Description | Highlight |
-| :--- | :--- | :--- |
-| **System-Wide CLI Command** | Packaged via `pyproject.toml` console scripts with automated `/bin/wchanger` integration. | ⚡ Instant terminal access |
-| **Multi-Monitor Display Engine** | Assigns independent, unique wallpapers to every connected monitor without duplicate stretching. | 🖥️ Native & Spanned Modes |
-| **6 Desktop Environments** | Native hooks for GNOME, Cinnamon, KDE Plasma (5 & 6), XFCE, MATE, and LXQt. | 🐧 Zero external desktop tools |
-| **Online Curated Sources** | Automatic streaming and caching from Wallhaven, Bing Daily, Picsum, and LoremFlickr. | 🌐 Unlimited fresh wallpapers |
-| **Intelligent Cache Management** | Automatically retains the most recent downloads (e.g. 20) and prunes stale images. | 🧹 Zero disk bloat |
-| **Automated Startup Wizard** | One-step interactive setup (`--install-autostart`) registers a background systemd login service. | 🔄 Start on sign-in |
-| **Persistent Configuration** | Stores your favorite folders, intervals, and sources in `config.toml` so you never retype flags. | ⚙️ Zero-typing workflow |
-| **Human Duration Parsing** | Supports flexible time units like `10m`, `1h`, `45s`, `1.5h`, `1d`, or plain seconds. | ⏱️ Intuitive syntax |
-| **Shuffle & Subfolder Discovery** | Deep directory traversal (`-R`) and randomized non-repeating shuffle (`-s`). | 🔀 Fresh rotations |
-| **Light & Dark Theme Sync** | Independent or synchronized GNOME 42+ day/night background switching. | 🌗 Adaptive theme modes |
+`wchanger` auto-detects your active desktop session. You can also override detection manually using CLI flags (`--gnome`, `--kde`, etc.).
 
+| Desktop Environment | Supported Versions | Session Type | Backend Tool | Multi-Monitor Method |
+| :--- | :--- | :--- | :--- | :--- |
+| **GNOME** | 3.38 – 48+ | Wayland / X11 | `gsettings` (`org.gnome.desktop.background`) | High-res Spanned Canvas |
+| **KDE Plasma** | 5.x & 6.x | Wayland / X11 | `qdbus` / `qdbus6` (`org.kde.PlasmaShell`) | Native screen containment |
+| **Cinnamon** | 4.x – 6.x+ | X11 / Wayland | `gsettings` (`org.cinnamon.desktop.background`) | High-res Spanned Canvas |
+| **XFCE** | 4.14 – 4.20+ | X11 | `xfconf-query` (`xfce4-desktop`) | Native per-monitor property |
+| **MATE** | 1.24 – 1.28+ | X11 | `gsettings` (`org.mate.background`) | High-res Spanned Canvas |
+| **LXQt** | 0.16 – 2.1+ | X11 / Wayland | `pcmanfm-qt` (`--set-wallpaper`) | Native multi-screen config |
+
+### Package Requirements
+
+The core CLI relies only on Python 3.8+ and system tools already present on most distributions:
+
+```bash
+# Debian / Ubuntu / Linux Mint
+sudo apt install python3-pip python3-pil libglib2.0-bin x11-xserver-utils
+
+# Fedora / RHEL
+sudo dnf install python3-pip python3-pillow glib2 xrandr
+
+# Arch Linux / Manjaro
+sudo pacman -S python-pip python-pillow glib2 xorg-xrandr
+```
+
+> [!NOTE]
+> For KDE Plasma, ensure `qdbus` (or `qdbus6` / `qt6-tools`) is installed. For XFCE, ensure `xfconf` is installed.
 
 ---
 
-<a id="-desktop-environments-matrix"></a>
-## 🖥️ Desktop Environments Matrix
+## Installation
 
-Anahita Wallpaper Changer natively interfaces with your desktop manager using system-native APIs:
+Choose the installation method that fits your workflow:
 
-| Desktop Environment | Supported Versions | Backend Setter | Multi-Monitor Method | Theme Awareness | Required Tool |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| **GNOME** | 3.38 – 47+ | `gsettings` (`org.gnome.desktop.background`) | High-res Spanned Canvas (`xrandr` + Pillow) | Light & Dark (`-t`) | `gsettings` (`libglib2.0-bin`) |
-| **KDE Plasma** | Plasma 5.x & 6.x | D-Bus (`org.kde.PlasmaShell`) | Native per-desktop scripting (`desktops()`) | System default | `qdbus` / `qdbus6` (`qt6-tools`) |
-| **Cinnamon** | 4.x – 6.x+ | `gsettings` (`org.cinnamon.desktop.background`) | High-res Spanned Canvas (`xrandr` + Pillow) | System default | `gsettings` (`glib2`) |
-| **XFCE** | 4.14 – 4.20+ | `xfconf-query` (`xfce4-desktop`) | Native per-monitor property assignment | System default | `xfconf-query` (`xfconf`) |
-| **MATE** | 1.24 – 1.28+ | `gsettings` (`org.mate.background`) | High-res Spanned Canvas (`xrandr` + Pillow) | System default | `gsettings` (`libglib2.0-bin`) |
-| **LXQt** | 0.16 – 2.1+ | `pcmanfm-qt` (`--set-wallpaper`) | Multi-Screen configuration profile & Spanned | System default | `pcmanfm-qt` (`pcmanfm-qt`) |
+### Option 1: User Install via Pip / Pipx (Recommended)
 
-<details>
-<summary><b>📦 Quick Package Install Commands for Desktop Dependencies</b></summary>
-
-<br/>
-
-**Debian / Ubuntu / Linux Mint:**
-```bash
-# GNOME, Cinnamon, MATE:
-sudo apt install libglib2.0-bin x11-xserver-utils
-
-# KDE Plasma:
-sudo apt install qdbus-qt6  # or qdbus-qt5
-
-# XFCE:
-sudo apt install xfconf
-
-# LXQt:
-sudo apt install pcmanfm-qt
-```
-
-**Fedora / RHEL:**
-```bash
-sudo dnf install glib2 xrandr qt6-qttools xfconf pcmanfm-qt
-```
-
-**Arch Linux / Manjaro:**
-```bash
-sudo pacman -S glib2 xorg-xrandr qt6-tools xfconf pcmanfm-qt
-```
-
-</details>
-
----
-
-<a id="-multi-monitor-support"></a>
-## 🖥️ Multi-Monitor Support
-
-When multiple displays are connected, `wchanger` detects monitor geometry and assigns **different wallpapers to each screen** simultaneously:
-
-```bash
-# Enable multi-monitor rotation from your wallpapers folder:
-wchanger -m ~/Pictures/Wallpapers
-
-# Stream different online wallpapers to each screen every 10 minutes:
-wchanger -m --online wallhaven -p 10m
-```
-
-### How Multi-Monitor Works:
-
-```
-  ┌────────────────────────────────┐    ┌────────────────────────────┐
-  │           Display 1            │    │           Display 2            │
-  │        (HDMI-1 / 4K UHD)       │    │        (DP-1 / 1440p)          │
-  │                                │    │                                │
-  │    [ Mountain Sunset Image ]   │    │    [ Deep Space Nebula Image ] │
-  └────────────────────────────────┘    └────────────────────────────┘
-```
-
-1. **KDE Plasma & XFCE (Native Multi-Screen):** Queries individual screen containments (`desktop[0]`, `desktop[1]` or `monitor0`, `monitor1`) and issues independent native background assignments.
-2. **GNOME, Cinnamon, MATE & LXQt (Intelligent Panoramic Canvas):** Inspects physical geometry and resolution for each monitor via `xrandr`, scales and crops each wallpaper without distortion (`ImageOps.fit`), then merges them into a wide composite image that desktop environments can assign as one background.
-3. **Anti-Caching Mechanism:** Alternates target output files (`multimonitor_spanned_0.png` ↔ `multimonitor_spanned_1.png`) so desktop environments register instant file URI changes and refresh correctly.
-
----
-
-<a id="-installation"></a>
-## 📦 Installation
-
-Install `wchanger` as a real system command accessible across all user terminals:
-
-### Method 1: Automatic Installer (Recommended)
+Installing to user space avoids modifying system files and complies with PEP 668:
 
 ```bash
 git clone https://github.com/ibehii/Wallpaper-changer.git
 cd Wallpaper-changer
 
-# Installs dependencies via pip and creates /bin/wchanger
-sudo ./install.sh
+# Install to ~/.local/bin
+pip install --user .
 ```
 
-### Method 2: Using Make
+### Option 2: System-Wide Binary (`/bin/wchanger`)
+
+To install system-wide so all users have access:
 
 ```bash
+sudo ./install.sh
+# or
 sudo make install-bin
 ```
 
-### Method 3: Standard Python Pip
+### Option 3: Run Directly from Source
+
+You can run `wchanger` directly without installing:
 
 ```bash
-pip install .
-
-# Create symlink so 'wchanger' is available in /bin
-sudo ln -sf $(which wchanger) /bin/wchanger
-```
-
-### 🧩 GNOME Shell Extension (Optional)
-
-If you use GNOME Shell (45–51+), install the native top-panel extension with **Next**, **Previous**, **Favorites**, and **Online Providers**:
-
-```bash
-# 1. Install & compile schemas locally
-make install-extension
-
-# Or package for extensions.gnome.org (EGO) / zip distribution:
-make pack-extension
-
-# 2. Reload GNOME Shell:
-#    - Wayland: Log out and log back in
-#    - X11: Press Alt+F2, type 'r', and press Enter
-
-# 3. Enable the extension
-gnome-extensions enable wchanger@ibehii.github.com
-
-# 4. Open settings/preferences (optional)
-gnome-extensions prefs wchanger@ibehii.github.com
-```
-
-> [!TIP]
-> **User-only installation:** If you do not have root or `sudo` access, run `pip install --user .` and ensure `~/.local/bin` is in your shell `PATH` (`export PATH="$HOME/.local/bin:$PATH"`).
-
----
-
-<a id="-online-wallpaper-sources"></a>
-## 🌐 Online Wallpaper Sources
-
-Never run out of wallpapers. Stream directly from popular photo curation platforms:
-
-| Provider Key | Provider Name | Description | Default Quality |
-| :---: | :---: | :---: | :---: |
-| `wallhaven` | **Wallhaven** | Real top-voted wallpapers from Wallhaven API | 1920x1080+ / 4K |
-| `bing` | **Bing Daily Photo** | Microsoft Bing's official daily curated picture | High-Res Curated |
-| `picsum` | **Lorem Picsum** | Stunning random photography from Picsum | 1920x1080 |
-| `loremflickr` | **LoremFlickr** | Fresh nature and landscape photography | 1920x1080 |
-
-### Examples:
-
-```bash
-# Bing Daily Wallpaper (single pass, update and exit):
-wchanger --online bing --no-repetition
-
-# Wallhaven with category filter (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general):
-wchanger --online wallhaven -C nature -p 5m -b
-
-# Wallhaven with custom keyword search (single pass):
-wchanger -C cyberpunk --no-repetition
-
-# Wallhaven Toplist (rotate every 5 minutes in background):
-wchanger --online wallhaven -p 5m -b
-
-# LoremFlickr with custom cache limit (keep last 15 images):
-wchanger --online loremflickr -p 3m --keep-last 15
+python3 wchanger.py ~/Pictures/Wallpapers
 ```
 
 ---
 
-<a id="-start-at-login-systemd"></a>
-## ⏰ Start at Login (Systemd Startup Service)
+## Tutorial 1: Local Wallpaper Folders
 
-Run the automated wizard to have `wchanger` start cleanly on every login:
+Learn how to control rotation interval, image order, subfolder discovery, and desktop themes when cycling local wallpaper collections.
+
+### Step 1: Run with Default Settings
+
+Pass a directory containing images (`.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`):
+
+```bash
+wchanger ~/Pictures/Wallpapers
+```
+
+By default, `wchanger` cycles through files alphabetically, changes the wallpaper every 60 seconds, and repeats indefinitely.
+
+### Step 2: Configure Rotation Intervals
+
+Use `-p` or `--pause` to specify the delay. You can provide integers (seconds) or human-readable time strings:
+
+```bash
+# 30 seconds
+wchanger -p 30s ~/Pictures/Wallpapers
+
+# 15 minutes
+wchanger -p 15m ~/Pictures/Wallpapers
+
+# 2 hours
+wchanger -p 2h ~/Pictures/Wallpapers
+```
+
+### Step 3: Randomize and Scan Subfolders
+
+- Use `-s` / `--shuffle` to randomize the playlist order.
+- Use `-R` / `--recursive` to find images located inside nested subfolders.
+
+```bash
+wchanger -s -R -p 10m ~/Pictures/Wallpapers
+```
+
+### Step 4: Single-Pass Mode
+
+To apply a random wallpaper once (e.g. from a script or keyboard shortcut) without running a background loop, use `-nr` / `--no-repetition`:
+
+```bash
+wchanger -s -nr ~/Pictures/Wallpapers
+```
+
+### Step 5: Light & Dark Theme Synchronization (GNOME 42+)
+
+GNOME maintains separate wallpaper keys for light and dark modes. By default, `wchanger` updates both keys simultaneously. You can target a specific theme with `-t` / `--theme`:
+
+```bash
+# Update dark mode wallpaper only
+wchanger -t dark ~/Pictures/Wallpapers/Dark
+
+# Update light mode wallpaper only
+wchanger -t light ~/Pictures/Wallpapers/Light
+```
+
+---
+
+## Tutorial 2: Multi-Monitor Setups
+
+Configure `wchanger` to display independent, non-repeating wallpapers across all connected screens.
+
+### Step 1: Enable Multi-Monitor Mode
+
+Add the `-m` (or `--multi-monitor`) flag to any rotation command:
+
+```bash
+wchanger -m -s -p 15m ~/Pictures/Wallpapers
+```
+
+When multi-monitor mode is active, `wchanger` detects connected displays and picks a unique image for each screen simultaneously.
+
+### Step 2: How Multi-Monitor Rendering Works
+
+Different desktop environments handle multi-monitor wallpapers differently:
+
+```text
+  ┌────────────────────────────────┐    ┌────────────────────────────┐
+  │           Monitor 1            │    │           Monitor 2            │
+  │        (e.g. 2560x1440)        │    │        (e.g. 1920x1080)        │
+  │                                │    │                            │
+  │     [ Mountain Landscape ]     │    │     [ Deep Space Nebula ]  │
+  └────────────────────────────────┘    └────────────────────────────┘
+```
+
+1. **Native Per-Monitor Assignment (KDE Plasma & XFCE):**
+   `wchanger` queries desktop containments (`desktop[0]`, `desktop[1]` in Plasma; `monitor0`, `monitor1` in XFCE) and sets wallpapers on each display independently using native APIs.
+2. **Virtual Composite Canvas (GNOME, Cinnamon, MATE, LXQt):**
+   These desktop environments expose only a single global wallpaper property. To achieve distinct wallpapers per monitor:
+   - `wchanger` queries monitor geometry via `xrandr` or display metrics.
+   - It crops and fits each image to match the exact resolution and aspect ratio of its assigned monitor using Pillow.
+   - It stitches the images side-by-side into a single wide composite canvas.
+   - It sets the desktop background mode to `spanned`.
+3. **Cache Invalidation:**
+   `wchanger` alternates output filenames (`multimonitor_spanned_0.png` and `multimonitor_spanned_1.png`) on every rotation to ensure desktop background managers detect the file change immediately.
+
+---
+
+## Tutorial 3: Online Wallpaper Providers
+
+Stream curated photography directly from online platforms without manually downloading files.
+
+Supported providers:
+
+| Provider Key | Name | Authentication | Best For |
+| :--- | :--- | :--- | :--- |
+| `unsplash` | **Unsplash** | Personal API Access Key (Free) | High-resolution curated photography & topics |
+| `wallhaven` | **Wallhaven** | None required | Desktop wallpapers, anime, digital art, 4K |
+| `bing` | **Bing Daily** | None required | Microsoft's daily curated nature photograph |
+| `picsum` | **Lorem Picsum** | None required | Random photography with minimal overhead |
+| `loremflickr` | **LoremFlickr** | None required | Random creative commons photography |
+
+---
+
+<a id="unsplash-setup-guide"></a>
+### Unsplash Setup (API Key & Categories)
+
+To comply with Unsplash API terms and prevent shared rate-limit throttling, `wchanger` requires you to use your own personal Unsplash Access Key. A free personal developer account provides 50 requests per hour, which is ample for desktop wallpaper rotation.
+
+> [!IMPORTANT]
+> `wchanger` never includes hardcoded API credentials. You maintain full control over your credentials and rate limits.
+
+#### Step 1: Obtain a Free Unsplash Access Key (1–2 Minutes)
+
+1. Go to the [Unsplash Developer Portal](https://unsplash.com/developers) and create a free account.
+2. Navigate to **Your Apps** → **New Application**.
+3. Accept the API Terms and Guidelines.
+4. Enter an application name (e.g. `My Linux Wallpaper Changer`) and a short description.
+5. Click **Create Application**.
+6. Scroll down to the **Keys** section and copy your **Access Key** (Client ID).
+
+#### Step 2: Configure Your Access Key
+
+Choose whichever method best fits your environment:
+
+- **Method A: Configuration File (Recommended)**  
+  Add your key to `~/.config/wchanger/config.toml`:
+  ```toml
+  source = "unsplash"
+  unsplash_access_key = "YOUR_ACCESS_KEY_HERE"
+  ```
+
+- **Method B: Environment Variable**  
+  Add to `~/.bashrc` or `~/.zshrc`:
+  ```bash
+  export UNSPLASH_ACCESS_KEY="YOUR_ACCESS_KEY_HERE"
+  ```
+
+- **Method C: Interactive Terminal Prompt**  
+  Run `wchanger --online unsplash`. If no key is configured, `wchanger` prompts for your key and offers to save it to `config.toml` automatically.
+
+- **Method D: CLI Flag**  
+  ```bash
+  wchanger --online unsplash --unsplash-key "YOUR_ACCESS_KEY_HERE"
+  ```
+
+- **Method E: GNOME Extension Preferences UI**  
+  Open extension preferences, select Unsplash as the source, and paste your key into the text field.
+
+#### Step 3: Filter by Unsplash Categories & Topics
+
+Use `-C` / `--category` to filter photos by subject:
+
+```bash
+# Rotate nature photos every 15 minutes
+wchanger --online unsplash -C nature -p 15m -b
+
+# Stream architecture photos
+wchanger --online unsplash -C architecture -p 30m -b
+```
+
+Supported Unsplash category presets:
+
+| Category Key | Topic | Content Description |
+| :--- | :--- | :--- |
+| `nature` | Nature & Landscapes | Mountains, forests, oceans, and skies |
+| `wallpapers` | Wallpapers | Compositions optimized for desktop screens |
+| `travel` | Travel & Destinations | Scenic landmarks, culture, and outdoor journeys |
+| `architecture` | Architecture & Design | Modern buildings, interiors, and minimalist structures |
+| `space` | Space & Astronomy | Nebulas, galaxies, planets, and starry night skies |
+| `minimalism` | Minimalist Photography | Clean lines, open space, and simple subjects |
+| `animals` | Animals & Wildlife | Wildlife, pets, and fauna |
+| `textures` | Textures & Patterns | Natural and geometric textures |
+| `city` | Street & Urban | Skylines, city streets, and night photography |
+| `technology` | Technology | Modern hardware, code, and futuristic tech |
+| `all` | Unfiltered Stream | Random high-resolution photography |
+
+---
+
+### Wallhaven Toplists & Topics
+
+Stream top-rated community wallpapers from Wallhaven without authentication:
+
+```bash
+# Stream Wallhaven's top-rated wallpapers
+wchanger --online wallhaven -p 10m -b
+
+# Stream wallpapers filtered by category keyword
+wchanger --online wallhaven -C anime -p 10m -b
+wchanger --online wallhaven -C cyberpunk -p 10m -b
+wchanger --online wallhaven -C space -p 10m -b
+```
+
+---
+
+### Cache Management & Prefetching
+
+Downloaded online wallpapers are stored in `~/.cache/wchanger/`.
+
+- **Automatic Cache Cleanup (`--keep-last`):**  
+  `wchanger` automatically prunes older downloads to keep disk usage bounded. By default, it preserves the 20 most recent images.
+  ```bash
+  # Keep only the last 10 images
+  wchanger --online unsplash --keep-last 10
+  ```
+
+- **Background Prefetching (`--prefetch`):**  
+  When running continuous online rotation, `wchanger` downloads the upcoming image in a background thread while you enjoy the current wallpaper. When the timer expires, the transition occurs instantly without network wait time.
+  ```bash
+  wchanger --online unsplash -p 5m --prefetch -b
+  ```
+
+---
+
+## Tutorial 4: Background Service & Login Autostart
+
+Set up `wchanger` to start automatically when you log in, running silently as a background service.
+
+### Step 1: Run the Interactive Setup Wizard
 
 ```bash
 wchanger --install-autostart
 ```
 
-```
+The wizard prompts you for your preferred rotation interval and wallpaper source:
+
+```text
 ============================================
   Automatic Startup Service Setup Wizard   
 ============================================
 
-[+] Enter pause duration between changing wallpapers [60]: 5m
-[+] Enter path to directory containing wallpapers [~/Pictures/wallpapers]: 
-[i] Generated user systemd service definition for user 'user':
-    Path: /home/user/.config/systemd/user/wallpaper-changer.service
-    Command: /usr/bin/python3 /bin/wchanger -p 300 -o log /home/user/Pictures/wallpapers
-    Logging: log (info.log)
+[+] Enter pause duration between changing wallpapers [60]: 10m
+[+] Enter path to directory or online provider: unsplash
+[i] Generated user systemd service definition:
+    Target:  ~/.config/systemd/user/wallpaper-changer.service
+    Command: /usr/bin/python3 /bin/wchanger -p 600 -o log --online unsplash
 
 [+] Successfully installed and activated 'wallpaper-changer.service'!
-[+] The service will now run automatically on login.
+[+] The service will now run automatically on login without requiring root/sudo.
 ```
 
-### Managing the Service:
+### Step 2: Managing the User Service
 
-Because `wchanger` uses unprivileged systemd user services, no root (`sudo`) permissions are required:
+Because `wchanger` uses systemd user services, all commands use `systemctl --user` without `sudo`:
 
 ```bash
 # Check service status
@@ -364,145 +439,240 @@ systemctl --user stop wallpaper-changer.service
 # Restart the service
 systemctl --user restart wallpaper-changer.service
 
-# Disable from starting automatically
+# Disable starting on login
 systemctl --user disable wallpaper-changer.service
+
+# View live service logs
+journalctl --user -u wallpaper-changer.service -f
 ```
+
+### Step 3: Standalone Background Process (`-b`)
+
+If you prefer not to use systemd, run `wchanger` as a detached daemon process using `-b` / `--run-background`:
+
+```bash
+wchanger -p 15m -s -b ~/Pictures/Wallpapers
+```
+
+The command detaches from your terminal session and writes logs to `info.log`.
 
 ---
 
-<a id="-configuration-file-configtoml"></a>
-## ⚙️ Configuration File (`config.toml`)
+## Tutorial 5: GNOME Shell Companion Extension
 
-Save your preferences in `config.toml` (next to the executable or in `~/.config/wchanger/config.toml`) for a zero-typing experience:
+If you use GNOME Shell (versions 45 through 48), the bundled extension allows you to control wallpaper rotation directly from your desktop top bar.
+
+### Step 1: Install and Compile the Extension
+
+```bash
+cd Wallpaper-changer
+make install-extension
+```
+
+This installs the extension files to `~/.local/share/gnome-shell/extensions/wchanger@ibehii.github.com` and compiles the GSettings schema.
+
+### Step 2: Restart GNOME Shell & Enable
+
+- **On Wayland:** Log out and log back in.
+- **On X11:** Press `Alt + F2`, type `r`, and press `Enter`.
+
+Enable the extension:
+
+```bash
+gnome-extensions enable wchanger@ibehii.github.com
+```
+
+### Step 3: Top Bar Indicator Controls
+
+A wallpaper icon appears in your top panel with the following features:
+
+- **Next / Previous:** Manually trigger wallpaper changes with one click.
+- **Pause / Resume:** Temporarily pause automatic rotation.
+- **Source Switcher:** Switch between local folders and online providers (`Wallhaven`, `Unsplash`, `Bing`, `Picsum`, `LoremFlickr`).
+- **Dynamic Category Submenu:** When Unsplash or Wallhaven is active, an interactive category menu appears with checkmarks to switch topics on the fly.
+- **Settings & Help:** Direct access to extension preferences and setup documentation.
+
+### Step 4: Configure Extension Preferences
+
+Open the graphical preferences window:
+
+```bash
+gnome-extensions prefs wchanger@ibehii.github.com
+```
+
+From the settings dialog, you can configure your wallpaper directory, rotation interval, Unsplash API Access Key, and default categories.
+
+---
+
+## Configuration Reference (`config.toml`)
+
+Instead of typing command-line flags every time, you can define your default preferences in a TOML configuration file.
+
+### File Search Locations
+
+`wchanger` checks for `config.toml` in the following order:
+
+1. Path specified by `--config <path>`
+2. Current working directory (`./config.toml`)
+3. User configuration directory (`~/.config/wchanger/config.toml`)
+4. System-wide configuration (`/etc/wchanger/config.toml`)
+
+### Example `config.toml`
 
 ```toml
-# =====================================================================
-# Anahita Wallpaper Changer (wchanger) - Configuration File
-# =====================================================================
-
-# Folder containing local wallpapers (used when source = "folder")
-folder = "~/Pictures/wallpapers"
+# Default wallpaper folder for local mode
+folder = "~/Pictures/Wallpapers"
 
 # Target desktop: "auto", "gnome", "cinnamon", "kde", "xfce", "mate", or "lxqt"
 desktop = "auto"
 
-# Pause duration (supports integers or units: "60", "10m", "1h", "45s")
-pause = 600
+# Pause duration (accepts integer seconds or human units like "30s", "10m", "1h")
+pause = "10m"
 
-# Loop continuously (true) or exit after cycling through all images once (false)
+# Wallpaper source: "folder", "wallhaven", "unsplash", "bing", "picsum", "loremflickr"
+source = "unsplash"
+
+# Unsplash API Access Key (required when source = "unsplash")
+unsplash_access_key = "YOUR_PERSONAL_ACCESS_KEY"
+
+# Category filter for Wallhaven or Unsplash (e.g. nature, space, architecture)
+category = "nature"
+
+# Randomize image selection order
+shuffle = true
+
+# Recursively scan subdirectories for images
+recursive = false
+
+# Enable independent wallpapers per monitor
+multi_monitor = true
+
+# Maximum number of downloaded online wallpapers to retain in cache
+keep_last = 20
+
+# Loop continuously (true) or exit after one pass (false)
 repetition = true
 
-# GNOME appearance theme: "both", "dark", or "light"
+# GNOME theme target: "both", "dark", or "light"
 theme = "both"
 
 # Output mode: "console" (terminal text) or "log" (info.log file)
 output = "console"
 
-# Randomize wallpaper playback order
-shuffle = true
-
-# Search subfolders recursively
-recursive = false
-
-# Wallpaper source: "folder", "wallhaven", "bing", "picsum", or "loremflickr"
-source = "wallhaven"
-
-# Maximum number of downloaded online wallpapers to retain in cache
-keep_last = 20
-
 # Run in background detached from terminal
 run_background = false
-
-# Set different wallpapers across multiple connected monitors
-multi_monitor = true
 ```
 
-> [!NOTE]
-> **Precedence Rule:** Command-line arguments always override settings defined in `config.toml`. Use `--no-config` to temporarily bypass the configuration file.
+### Precedence Order
+
+When the same setting is configured in multiple places, `wchanger` resolves values in the following order of priority:
+
+$$\text{CLI Flag} > \text{Environment Variable} > \text{config.toml} > \text{Default Value}$$
+
+Use the `--no-config` flag to bypass `config.toml` and run purely with CLI flags.
 
 ---
 
-<a id="-cli-reference"></a>
-## 🛠️ CLI Options Reference
+## CLI Reference
 
 ```text
 Usage: wchanger [OPTIONS] [PHOTO_PATH]
 ```
 
-### Command Flags:
+### Options Table
 
-| Option | Flag | Type | Default | Description |
+| Option | Short | Type | Default | Description |
 | :--- | :---: | :---: | :---: | :--- |
-| `--pause` | `-p` | Duration | `60` | Pause duration between rotations (`30s`, `10m`, `1h`, `1.5h`). |
-| `--shuffle` / `--no-shuffle` | `-s` | Flag | `false` | Randomize wallpaper playback sequence. |
-| `--recursive` / `--no-recursive` | `-R` | Flag | `false` | Recursively scan subfolders for valid images. |
+| `--pause` | `-p` | Duration | `60` | Rotation interval (`30s`, `10m`, `1h`, or raw seconds). |
+| `--shuffle` / `--no-shuffle` | `-s` | Flag | `false` | Randomize playback order instead of alphabetical sequence. |
+| `--recursive` / `--no-recursive` | `-R` | Flag | `false` | Recursively scan subdirectories for valid image files. |
 | `--multi-monitor` / `--single-monitor` | `-m` | Flag | `false` | Assign different wallpapers across connected displays. |
-| `--online` | | Choice | `None` | Stream online wallpapers (`wallhaven`, `bing`, `picsum`, `loremflickr`). |
-| `--category` | `-C` | String | `None` | Category or search keyword for Wallhaven (`nature`, `space`, `anime`, `cyberpunk`, etc.). |
-| `--source` | | Choice | `folder` | Source mode (`folder`, `local`, or online provider name). |
-| `--keep-last` | | Integer | `20` | Max downloaded wallpapers to retain in `~/.cache/wchanger/`. |
-| `--run-background` | `-b` | Flag | `false` | Run as a silent, detached daemon process. |
-| `--install-autostart` | `--auto-start` | Flag | `false` | Interactive wizard to install systemd login service. |
-| `--config` | `-c` | Path | `config.toml` | Path to custom TOML configuration file. |
-| `--no-config` | | Flag | `false` | Ignore `config.toml` and rely purely on CLI arguments. |
+| `--online` | | Choice | `None` | Fetch online wallpapers (`wallhaven`, `unsplash`, `bing`, `picsum`, `loremflickr`). |
+| `--category` | `-C` | String | `None` | Category or keyword filter for Wallhaven or Unsplash. |
+| `--unsplash-key` | | String | `None` | Personal Unsplash API Access Key. |
+| `--source` | | Choice | `folder` | Source type (`folder`, `local`, or online provider name). |
+| `--keep-last` | | Integer | `20` | Max downloaded online wallpapers to retain in `~/.cache/wchanger/`. |
+| `--prefetch` / `--no-prefetch` | | Flag | `true` | Pre-download the next online wallpaper in background. |
+| `--run-background` | `-b` | Flag | `false` | Detach and run as a background daemon process. |
+| `--install-autostart` | `--auto-start` | Flag | `false` | Launch interactive wizard to install systemd user service. |
+| `--repetition` / `--no-repetition` | `-r` / `-nr`| Flag | `true` | Loop continuously (`-r`) or exit after setting wallpapers once (`-nr`). |
+| `--theme` | `-t` | Choice | `both` | GNOME light/dark mode target (`dark`, `light`, or `both`). |
+| `--output` | `-o` | Choice | `console` | Progress output (`console` for stdout, `log` for `info.log`). |
+| `--config` | `-c` | Path | Auto | Path to a custom TOML configuration file. |
+| `--no-config` | | Flag | `false` | Disable loading settings from `config.toml`. |
 | `--gnome` | | Flag | Auto | Explicitly set desktop environment to GNOME. |
-| `--cinnamon` | `--cinamon` | Flag | Auto | Explicitly set desktop environment to Cinnamon. |
+| `--cinnamon` | | Flag | Auto | Explicitly set desktop environment to Cinnamon. |
 | `--kde` | `--plasma` | Flag | Auto | Explicitly set desktop environment to KDE Plasma. |
-| `--xfce` | `--xfce4` | Flag | Auto | Explicitly set desktop environment to XFCE. |
+| `--xfce` | | Flag | Auto | Explicitly set desktop environment to XFCE. |
 | `--mate` | | Flag | Auto | Explicitly set desktop environment to MATE. |
 | `--lxqt` | | Flag | Auto | Explicitly set desktop environment to LXQt. |
-| `--theme` | `-t` | Choice | `both` | GNOME 42+ target theme (`dark`, `light`, or `both`). |
-| `--output` | `-o` | Choice | `console` | Progress output (`console` for terminal, `log` for `info.log`). |
-| `--repetition` / `--no-repetition` | `-r` / `-nr`| Flag | `repetition` | Loop indefinitely or exit after setting all wallpapers once. |
-| `--help` | `-h` | Flag | | Show command help message and available options. |
+| `--help` | `-h` | Flag | | Show help message and exit. |
 
 ---
 
-<a id="-troubleshooting"></a>
-## 🔍 Troubleshooting
+## Troubleshooting & FAQ
 
-<details open>
-<summary><b>Common Issues & Solutions</b></summary>
+### Missing System Tool Errors
 
-<br/>
+If you see an error indicating a required tool was not found in your `PATH`:
 
-| Issue | Cause | Solution |
-| :--- | :--- | :--- |
-| `Error: Required tool 'gsettings' was not found in PATH` | GLib utilities are not installed (GNOME / Cinnamon / MATE). | Install `libglib2.0-bin` (Debian/Ubuntu) or `glib2` (Fedora/Arch). |
-| `Error: 'qdbus' utility was not found on your system PATH` | Qt D-Bus tool is missing (KDE Plasma). | Install `qdbus-qt6` or `qt6-tools` via your package manager. |
-| `Error: 'xfconf-query' utility was not found` | XFCE configuration tool is missing. | Install `xfconf` package via your package manager. |
-| `Error: 'pcmanfm-qt' utility was not found` | LXQt file manager / desktop utility is missing. | Install `pcmanfm-qt` package via your package manager. |
-| `Error: Could not auto-detect your desktop environment` | Non-standard session or custom window manager. | Pass `--gnome`, `--cinnamon`, `--kde`, `--xfce`, `--mate`, or `--lxqt` explicitly. |
-| Wallpapers do not visibly change on KDE Plasma | Desktop widgets are locked in Plasma. | Unlock desktop widgets or run: `qdbus org.kde.plasmashell /PlasmaShell evaluateScript 'lockCorona(!locked); lockCorona(false);'` to force refresh. |
-| `[!] Network Error: Unable to connect to '<provider>'` | Computer is offline or DNS lookup failed. | Check connection; `wchanger` automatically retries next interval without crashing. |
-| Multi-monitor shows duplicate wallpapers on GNOME | `xrandr` is not installed or running Wayland without display query. | Install `x11-xserver-utils` (Debian/Ubuntu) or `xorg-xrandr` (Arch). |
+- **`gsettings` not found:** Install `libglib2.0-bin` (Debian/Ubuntu) or `glib2` (Fedora/Arch).
+- **`qdbus` not found:** On KDE Plasma, install `qdbus-qt6` (Debian/Ubuntu) or `qt6-tools` (Fedora/Arch).
+- **`xfconf-query` not found:** On XFCE, install `xfconf`.
+- **`pcmanfm-qt` not found:** On LXQt, install `pcmanfm-qt`.
 
-</details>
+### Unsplash HTTP 401 or 403 Errors
 
----
+- **HTTP 401 (Unauthorized):** Your Unsplash Access Key is missing or invalid. Verify that the key pasted into `config.toml` or extension preferences matches the **Access Key** from your Unsplash Developer dashboard (not the Secret Key).
+- **HTTP 403 (Rate Limit Exceeded):** Free Unsplash developer applications are limited to 50 requests per hour. Increase your rotation interval (e.g. `-p 15m` or `-p 30m`) so requests remain comfortably within limits.
 
-## 🤝 Contributing
+### Multi-Monitor Shows Duplicate Images on GNOME / Cinnamon
 
-Contributions and feedback are always welcome!
+- GNOME and Cinnamon require `xrandr` to query screen dimensions under X11, or GNOME display metrics under Wayland. Install `x11-xserver-utils` (Debian/Ubuntu) or `xorg-xrandr` (Arch).
+- Ensure Pillow is installed (`pip install pillow`) so `wchanger` can render the composite canvas.
 
-1. **Fork the Repository**: Click the `Fork` button at the top right of GitHub.
-2. **Create a Feature Branch**:
-   ```bash
-   git checkout -b feature/cool-new-feature
-   ```
-3. **Run the Test Suite**:
-   ```bash
-   python3 -m unittest discover -s tests
-   ```
-4. **Commit & Push**:
-   ```bash
-   git commit -m "Add cool new feature"
-   git push origin feature/cool-new-feature
-   ```
-5. **Open a Pull Request**: Submit your PR on GitHub for review.
+### Wallpapers Do Not Change on KDE Plasma
+
+On some Plasma configurations, desktop containment scripts may be locked. Verify widgets are unlocked, or restart Plasma shell:
+
+```bash
+kquitapp6 plasmashell && kstart5 plasmashell # KDE 6: kquitapp6 plasmashell && plasmashell &
+```
+
+### Checking Daemon Logs
+
+When running with `-b` or `-o log`, inspect `info.log` in your working directory or check systemd logs:
+
+```bash
+journalctl --user -u wallpaper-changer.service -e
+```
 
 ---
 
-## 📄 License
+## Development & Contributing
 
-This project is licensed under the **[MIT License](LICENSE)**. Open source, libre, and built for the Linux community with ❤️.
+Contributions, bug reports, and pull requests are welcome.
+
+### Running the Test Suite
+
+`wchanger` includes a comprehensive unit and integration test suite covering CLI parsing, configuration loading, network mocking, and desktop setters:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+### Building the GNOME Extension Package
+
+To package the GNOME Shell extension for distribution:
+
+```bash
+make pack-extension
+```
+
+This creates a zip archive (`wchanger@ibehii.github.com.shell-extension.zip`) ready for installation or uploading to [extensions.gnome.org](https://extensions.gnome.org/).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

@@ -123,26 +123,29 @@ function runCommandAsync(argv, onFinished = null) {
     try {
         const proc = new Gio.Subprocess({
             argv: argv,
-            flags: Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE,
+            flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
         });
         proc.init(null);
-        proc.wait_async(null, (procObj, res) => {
+        proc.communicate_utf8_async(null, null, (procObj, res) => {
             try {
-                procObj.wait_finish(res);
+                const [, stdout, stderr] = procObj.communicate_utf8_finish(res);
+                const success = procObj.get_successful();
                 if (onFinished) {
-                    onFinished(procObj.get_successful());
+                    onFinished(success, stdout || '', stderr || '');
                 }
             } catch (err) {
                 if (onFinished) {
-                    onFinished(false);
+                    onFinished(false, '', err.message || '');
                 }
             }
         });
+        return proc;
     } catch (e) {
         logError(e, `[wchanger-extension] Failed to launch subprocess: ${argv.join(' ')}`);
         if (onFinished) {
-            onFinished(false);
+            onFinished(false, '', e.message || '');
         }
+        return null;
     }
 }
 
@@ -357,12 +360,15 @@ class WchangerIndicator extends PanelMenu.Button {
             this._rotatorEnabledChangedId = this._settings.connect('changed::rotator-enabled', () => {
                 const enabled = this._getBooleanSetting('rotator-enabled', false);
                 if (this._serviceSwitch && this._serviceSwitch.state !== enabled) {
+                    this._syncingRotatorSwitch = true;
                     this._serviceSwitch.setToggleState(enabled);
+                    this._syncingRotatorSwitch = false;
                 }
                 if (enabled) {
                     this._startRotatorTimer();
                 } else {
                     this._stopRotatorTimer();
+                    this._cancelActiveRotation();
                 }
             });
 
@@ -372,10 +378,18 @@ class WchangerIndicator extends PanelMenu.Button {
                     this._useLocalSourceSwitch.setToggleState(isLocal);
                 }
                 this._updateWallhavenCategoryVisibility();
+                this._updateUnsplashCategoryVisibility();
+                if (typeof this._updateProviderMenuOrnaments === 'function') {
+                    this._updateProviderMenuOrnaments();
+                }
             });
 
             this._defaultProviderChangedId = this._settings.connect('changed::default-provider', () => {
                 this._updateWallhavenCategoryVisibility();
+                this._updateUnsplashCategoryVisibility();
+                if (typeof this._updateProviderMenuOrnaments === 'function') {
+                    this._updateProviderMenuOrnaments();
+                }
             });
         }
 
@@ -451,7 +465,9 @@ class WchangerIndicator extends PanelMenu.Button {
         if (!this._getBooleanSetting('rotator-enabled', false)) {
             this._setBooleanSetting('rotator-enabled', true);
             if (this._serviceSwitch && !this._serviceSwitch.state) {
+                this._syncingRotatorSwitch = true;
                 this._serviceSwitch.setToggleState(true);
+                this._syncingRotatorSwitch = false;
             }
             this._startRotatorTimer();
             this._controlSystemdService('start');
@@ -473,7 +489,33 @@ class WchangerIndicator extends PanelMenu.Button {
         }
     }
 
+    _updateUnsplashCategoryVisibility() {
+        if (!this._unsplashSubMenu && !this._unsplashGuideItem) return;
+        const source = this._getStringSetting('wallpaper-source', 'local');
+        const provider = this._getStringSetting('default-provider', 'wallhaven');
+        const isUnsplashActive = (source === 'online' && provider === 'unsplash');
+
+        if (this._unsplashSubMenu) {
+            if (typeof this._unsplashSubMenu.visible !== 'undefined') {
+                this._unsplashSubMenu.visible = isUnsplashActive;
+            }
+            if (this._unsplashSubMenu.actor && typeof this._unsplashSubMenu.actor.visible !== 'undefined') {
+                this._unsplashSubMenu.actor.visible = isUnsplashActive;
+            }
+        }
+
+        if (this._unsplashGuideItem) {
+            if (typeof this._unsplashGuideItem.visible !== 'undefined') {
+                this._unsplashGuideItem.visible = isUnsplashActive;
+            }
+            if (this._unsplashGuideItem.actor && typeof this._unsplashGuideItem.actor.visible !== 'undefined') {
+                this._unsplashGuideItem.actor.visible = isUnsplashActive;
+            }
+        }
+    }
+
     destroy() {
+        this._cancelActiveRotation();
         if (this._rotatorTimerId) {
             GLib.Source.remove(this._rotatorTimerId);
             this._rotatorTimerId = null;
@@ -506,6 +548,10 @@ class WchangerIndicator extends PanelMenu.Button {
         this._settings = null;
         this._wallhavenSubMenu = null;
         this._wallhavenMenuItems = null;
+        this._providerMenuItems = null;
+        this._unsplashSubMenu = null;
+        this._unsplashMenuItems = null;
+        this._unsplashGuideItem = null;
         super.destroy();
     }
 
@@ -638,15 +684,37 @@ class WchangerIndicator extends PanelMenu.Button {
 
         const providers = [
             { label: this._gettext('Wallhaven'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
+            { label: this._gettext('Unsplash'), key: 'unsplash', icon: 'camera-photo-symbolic' },
             { label: this._gettext('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
             { label: this._gettext('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
             { label: this._gettext('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
         ];
+
+        this._providerMenuItems = [];
         providers.forEach(p => {
             const item = new PopupMenu.PopupImageMenuItem(p.label, p.icon);
+            item._providerKey = p.key;
             item.connect('activate', () => {
                 this._setStringSetting('wallpaper-source', 'online');
                 this._setStringSetting('default-provider', p.key);
+                updateProviderMenuOrnaments();
+                if (p.key === 'unsplash') {
+                    const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
+                    if (!unsplashKey) {
+                        try {
+                            if (typeof Main !== 'undefined' && Main?.notify) {
+                                Main.notify(
+                                    'Anahita Wallpaper Changer',
+                                    this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
+                                );
+                            }
+                            Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
+                        } catch (err) {
+                            logError(err, '[wchanger-ext] Failed to show Unsplash notice');
+                        }
+                        return;
+                    }
+                }
                 this._ensureRotatorEnabled();
                 const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', p.key, '--no-repetition'];
@@ -655,12 +723,45 @@ class WchangerIndicator extends PanelMenu.Button {
                     if (category.length > 0) {
                         args.push('-C', category);
                     }
+                } else if (p.key === 'unsplash') {
+                    const unsplashCat = (this._getStringSetting('unsplash-category', 'nature') || '').trim();
+                    if (unsplashCat.length > 0 && unsplashCat !== 'all') {
+                        args.push('-C', unsplashCat);
+                    }
+                    const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
+                    if (unsplashKey) {
+                        args.push('--unsplash-key', unsplashKey);
+                    }
                 }
                 if (multiMon) args.push('-m');
                 this._runWchangerCommand(args);
             });
+            this._providerMenuItems.push(item);
             sourcesSubMenu.menu.addMenuItem(item);
         });
+
+        const updateProviderMenuOrnaments = () => {
+            const isOnline = this._getStringSetting('wallpaper-source', 'local') === 'online';
+            const currentProvider = (this._getStringSetting('default-provider', 'wallhaven') || 'wallhaven').toLowerCase().trim();
+            for (const item of this._providerMenuItems) {
+                const isSelected = isOnline && (item._providerKey === currentProvider);
+                if (typeof item.setOrnament === 'function') {
+                    const checkOrnament = PopupMenu.Ornament?.CHECK ?? 2;
+                    const noneOrnament = PopupMenu.Ornament?.NONE ?? 0;
+                    item.setOrnament(isSelected ? checkOrnament : noneOrnament);
+                }
+            }
+        };
+
+        this._updateProviderMenuOrnaments = updateProviderMenuOrnaments;
+        updateProviderMenuOrnaments();
+
+        sourcesSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen) {
+                updateProviderMenuOrnaments();
+            }
+        });
+
         this.menu.addMenuItem(sourcesSubMenu);
 
         // Section 3b: Wallhaven Categories Submenu (conditionally visible when Wallhaven is active)
@@ -724,6 +825,101 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._wallhavenSubMenu);
         this._updateWallhavenCategoryVisibility();
 
+        // Section 3b-2: Unsplash Categories Submenu (conditionally visible when Unsplash is active)
+        this._unsplashSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Unsplash Categories'), true);
+        if (this._unsplashSubMenu.icon) {
+            this._unsplashSubMenu.icon.icon_name = 'view-grid-symbolic';
+        }
+
+        const unsplashCategories = [
+            { key: 'nature', label: this._gettext('Nature & Landscapes') },
+            { key: 'wallpapers', label: this._gettext('Desktop Wallpapers') },
+            { key: 'travel', label: this._gettext('Travel & Exploration') },
+            { key: 'architecture', label: this._gettext('Architecture & Interiors') },
+            { key: 'space', label: this._gettext('Space & Astronomy') },
+            { key: 'minimalism', label: this._gettext('Minimalism') },
+            { key: 'animals', label: this._gettext('Animals & Wildlife') },
+            { key: 'textures', label: this._gettext('Textures & Patterns') },
+            { key: 'city', label: this._gettext('Street & City') },
+            { key: 'technology', label: this._gettext('Technology & Cyber') },
+            { key: 'all', label: this._gettext('All (Random)') },
+        ];
+
+        this._unsplashMenuItems = [];
+        unsplashCategories.forEach(cat => {
+            const item = new PopupMenu.PopupMenuItem(cat.label);
+            item._categoryKey = cat.key;
+            item.connect('activate', () => {
+                const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
+                this._setStringSetting('wallpaper-source', 'online');
+                this._setStringSetting('default-provider', 'unsplash');
+                this._setStringSetting('unsplash-category', cat.key);
+                if (!unsplashKey) {
+                    try {
+                        if (typeof Main !== 'undefined' && Main?.notify) {
+                            Main.notify(
+                                'Anahita Wallpaper Changer',
+                                this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
+                            );
+                        }
+                        Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
+                    } catch (err) {
+                        logError(err, '[wchanger-ext] Failed to show Unsplash notice');
+                    }
+                    return;
+                }
+                this._ensureRotatorEnabled();
+                const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
+                const args = ['--online', 'unsplash', '--no-repetition'];
+                if (cat.key !== 'all') {
+                    args.push('-C', cat.key);
+                }
+                args.push('--unsplash-key', unsplashKey);
+                if (multiMon) args.push('-m');
+                this._runWchangerCommand(args);
+            });
+            this._unsplashMenuItems.push(item);
+            this._unsplashSubMenu.menu.addMenuItem(item);
+        });
+
+        const updateUnsplashMenuOrnaments = () => {
+            const currentCat = (this._getStringSetting('unsplash-category', 'nature') || 'nature').toLowerCase().trim();
+            for (const item of this._unsplashMenuItems) {
+                const isSelected = (item._categoryKey === currentCat);
+                if (typeof item.setOrnament === 'function') {
+                    const checkOrnament = PopupMenu.Ornament?.CHECK ?? 2;
+                    const noneOrnament = PopupMenu.Ornament?.NONE ?? 0;
+                    item.setOrnament(isSelected ? checkOrnament : noneOrnament);
+                }
+            }
+        };
+
+        updateUnsplashMenuOrnaments();
+
+        this._unsplashSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen) {
+                updateUnsplashMenuOrnaments();
+            }
+        });
+
+        this.menu.addMenuItem(this._unsplashSubMenu);
+
+        // Section 3b-3: Unsplash Setup Guide (conditionally visible when Unsplash is active)
+        this._unsplashGuideItem = new PopupMenu.PopupImageMenuItem(
+            this._gettext('Unsplash Setup Guide (README.md)'),
+            'help-browser-symbolic'
+        );
+        this._unsplashGuideItem.connect('activate', () => {
+            try {
+                Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
+            } catch (err) {
+                logError(err, '[wchanger-ext] Failed to open README guide');
+            }
+        });
+        this.menu.addMenuItem(this._unsplashGuideItem);
+
+        this._updateUnsplashCategoryVisibility();
+
         // Section 3c: Multi-Monitor Quick Action
         const multiMonItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Multi-Monitor'), 'video-display-symbolic');
         multiMonItem.connect('activate', () => {
@@ -744,6 +940,20 @@ class WchangerIndicator extends PanelMenu.Button {
                     if (category.length > 0) {
                         args.push('-C', category);
                     }
+                } else if (defaultProvider === 'unsplash') {
+                    const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
+                    if (!unsplashKey) {
+                        Main.notify(
+                            'Anahita Wallpaper Changer',
+                            this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
+                        );
+                        return;
+                    }
+                    const unsplashCat = (this._getStringSetting('unsplash-category', 'nature') || '').trim();
+                    if (unsplashCat.length > 0 && unsplashCat !== 'all') {
+                        args.push('-C', unsplashCat);
+                    }
+                    args.push('--unsplash-key', unsplashKey);
                 }
                 this._runWchangerCommand(args);
             }
@@ -753,6 +963,7 @@ class WchangerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Section 4: Automatic Background Rotator Switch
+        this._syncingRotatorSwitch = false;
         this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Background Rotator'), false);
         const rotatorIcon = new St.Icon({
             icon_name: 'view-refresh-symbolic',
@@ -761,13 +972,14 @@ class WchangerIndicator extends PanelMenu.Button {
         this._serviceSwitch.insert_child_at_index(rotatorIcon, 0);
 
         this._serviceSwitch.connect('toggled', (item, state) => {
+            if (this._syncingRotatorSwitch) return;
             this._setBooleanSetting('rotator-enabled', state);
             if (state) {
                 this._startRotatorTimer();
-                this._triggerWchangerRotation();
                 this._controlSystemdService('start');
             } else {
                 this._stopRotatorTimer();
+                this._cancelActiveRotation();
                 this._controlSystemdService('stop');
             }
         });
@@ -789,7 +1001,6 @@ class WchangerIndicator extends PanelMenu.Button {
 
         this.menu.connect('open-state-changed', (menu, isOpen) => {
             if (isOpen) {
-                this._checkSystemdServiceState();
                 this._updateNavButtons();
             }
         });
@@ -803,11 +1014,12 @@ class WchangerIndicator extends PanelMenu.Button {
 
     _initRotator() {
         const enabled = this._getBooleanSetting('rotator-enabled', false);
+        this._syncingRotatorSwitch = true;
         this._serviceSwitch.setToggleState(enabled);
+        this._syncingRotatorSwitch = false;
         if (enabled) {
             this._startRotatorTimer();
         }
-        this._checkSystemdServiceState();
     }
 
     _startRotatorTimer() {
@@ -852,8 +1064,32 @@ class WchangerIndicator extends PanelMenu.Button {
             if (category.length > 0) {
                 args.push('-C', category);
             }
+        } else if (defaultProvider === 'unsplash') {
+            const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
+            if (!unsplashKey) {
+                Main.notify(
+                    'Anahita Wallpaper Changer',
+                    this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
+                );
+                return;
+            }
+            const unsplashCat = (this._getStringSetting('unsplash-category', 'nature') || '').trim();
+            if (unsplashCat.length > 0 && unsplashCat !== 'all') {
+                args.push('-C', unsplashCat);
+            }
+            args.push('--unsplash-key', unsplashKey);
         }
         this._runWchangerCommand(args);
+    }
+
+    _cancelActiveRotation() {
+        this._rotationCancelled = true;
+        if (this._activeRotationProc) {
+            try {
+                this._activeRotationProc.force_exit();
+            } catch (e) {}
+            this._activeRotationProc = null;
+        }
     }
 
     _runWchangerCommand(args) {
@@ -867,15 +1103,49 @@ class WchangerIndicator extends PanelMenu.Button {
             return;
         }
 
+        // Cancel previous rotation subprocess if still running
+        if (this._activeRotationProc) {
+            try {
+                this._activeRotationProc.force_exit();
+            } catch (e) {}
+            this._activeRotationProc = null;
+        }
+
+        this._rotationCancelled = false;
         const fullArgv = [...baseCmd, ...args];
-        runCommandAsync(fullArgv, (success) => {
+        this._activeRotationProc = runCommandAsync(fullArgv, (success, stdout, stderr) => {
+            this._activeRotationProc = null;
+            if (this._rotationCancelled) {
+                this._rotationCancelled = false;
+                return;
+            }
             if (success) {
                 this._syncCurrentBackground();
             } else {
-                Main.notify(
-                    'Anahita Wallpaper Changer',
-                    this._gettext('Failed to rotate wallpaper. Please verify image path or online connection.')
-                );
+                const isUnsplash = args.includes('unsplash');
+                const errText = `${stderr || ''} ${stdout || ''}`.toLowerCase();
+
+                if (isUnsplash && (errText.includes('requires an access key') || errText.includes('access key is required') || !this._getStringSetting('unsplash-access-key', '').trim())) {
+                    Main.notify(
+                        'Anahita Wallpaper Changer',
+                        this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
+                    );
+                } else if (isUnsplash && (errText.includes('401') || errText.includes('unauthorized') || errText.includes('invalid or expired'))) {
+                    Main.notify(
+                        'Anahita Wallpaper Changer',
+                        this._gettext('Unsplash API authentication failed (HTTP 401). Your Access Key is invalid or expired.')
+                    );
+                } else if (isUnsplash && (errText.includes('403') || errText.includes('rate limit'))) {
+                    Main.notify(
+                        'Anahita Wallpaper Changer',
+                        this._gettext('Unsplash hourly rate limit exceeded (HTTP 403). Free tier is limited to 50 requests/hour.')
+                    );
+                } else {
+                    Main.notify(
+                        'Anahita Wallpaper Changer',
+                        this._gettext('Failed to rotate wallpaper. Please verify image path or online connection.')
+                    );
+                }
             }
         });
     }

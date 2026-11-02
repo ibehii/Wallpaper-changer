@@ -1837,6 +1837,7 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("--online", result.output)
         self.assertIn("wallhaven", result.output)
+        self.assertIn("unsplash", result.output)
         self.assertIn("bing", result.output)
         self.assertIn("picsum", result.output)
         self.assertIn("loremflickr", result.output)
@@ -3683,14 +3684,14 @@ class TestWallpaperChanger(unittest.TestCase):
     def test_cli_category_warning_for_other_provider(
         self, mock_verify: MagicMock, mock_cycle: MagicMock
     ) -> None:
-        """CLI should notify user if --category is passed with a provider other than wallhaven."""
+        """CLI should notify user if --category is passed with a provider other than wallhaven or unsplash."""
         runner = CliRunner()
         result = runner.invoke(
             wchanger.cli,
             ["--gnome", "--online", "bing", "-C", "nature", "--no-repetition", "--no-config"],
         )
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("The --category option applies only to 'wallhaven' and will be ignored for 'bing'", result.output)
+        self.assertIn("The --category option applies only to 'wallhaven' and 'unsplash' and will be ignored for 'bing'", result.output)
 
     @patch("wchanger.run_wallpaper_cycle")
     @patch("wchanger.verify_system_requirements")
@@ -3706,7 +3707,192 @@ class TestWallpaperChanger(unittest.TestCase):
             ["--gnome", "--source", "folder", "-C", "nature", "--no-repetition", "--no-config", str(self.test_dir)],
         )
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("The --category option applies only to 'wallhaven' and will be ignored for 'local folder mode'", result.output)
+        self.assertIn("The --category option applies only to 'wallhaven' and 'unsplash' and will be ignored for 'local folder mode'", result.output)
+
+    def test_get_unsplash_access_key_priority(self) -> None:
+        """get_unsplash_access_key should respect explicit argument over env vars and config."""
+        with patch.dict(os.environ, {"UNSPLASH_ACCESS_KEY": "env_key"}):
+            resolved = wchanger.get_unsplash_access_key(
+                explicit_key="arg_key",
+                config_settings={"unsplash_access_key": "cfg_key"},
+            )
+            self.assertEqual(resolved, "arg_key")
+
+        with patch.dict(os.environ, {"UNSPLASH_ACCESS_KEY": "env_key"}):
+            resolved = wchanger.get_unsplash_access_key(
+                config_settings={"unsplash_access_key": "cfg_key"},
+            )
+            self.assertEqual(resolved, "env_key")
+
+        with patch.dict(os.environ, {}, clear=True):
+            resolved = wchanger.get_unsplash_access_key(
+                config_settings={"unsplash_access_key": "cfg_key"},
+            )
+            self.assertEqual(resolved, "cfg_key")
+
+    def test_save_unsplash_access_key_to_config(self) -> None:
+        """save_unsplash_access_key_to_config should write and update unsplash_access_key."""
+        test_cfg = self.test_dir / "config.toml"
+        test_cfg.write_text("desktop = 'gnome'\npause = 300\n", encoding="utf-8")
+
+        saved = wchanger.save_unsplash_access_key_to_config("new_test_key_123", config_path=test_cfg)
+        self.assertEqual(saved, test_cfg)
+        content = test_cfg.read_text(encoding="utf-8")
+        self.assertIn('unsplash_access_key = "new_test_key_123"', content)
+        self.assertIn("desktop = 'gnome'", content)
+
+        # Update existing key
+        wchanger.save_unsplash_access_key_to_config("updated_key_456", config_path=test_cfg)
+        updated_content = test_cfg.read_text(encoding="utf-8")
+        self.assertIn('unsplash_access_key = "updated_key_456"', updated_content)
+        self.assertNotIn("new_test_key_123", updated_content)
+
+    @patch("wchanger.trigger_unsplash_download_tracking")
+    @patch("wchanger.urlopen")
+    def test_fetch_unsplash_url_success(
+        self, mock_urlopen: MagicMock, mock_tracking: MagicMock
+    ) -> None:
+        """fetch_unsplash_url should query API with Client-ID header and return image URL."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = (
+            b'{"id": "photo_123", "urls": {"full": "https://images.unsplash.com/full_photo.jpg"}, '
+            b'"links": {"download_location": "https://api.unsplash.com/photos/photo_123/download"}}'
+        )
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        url = wchanger.fetch_unsplash_url(access_key="my_secret_access_key")
+        self.assertEqual(url, "https://images.unsplash.com/full_photo.jpg")
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.headers.get("Authorization"), "Client-ID my_secret_access_key")
+        self.assertIn("https://api.unsplash.com/photos/random", req.full_url)
+        mock_tracking.assert_called_once_with(
+            "https://api.unsplash.com/photos/photo_123/download", "my_secret_access_key"
+        )
+
+    @patch("wchanger.urlopen")
+    def test_fetch_unsplash_url_with_category(self, mock_urlopen: MagicMock) -> None:
+        """fetch_unsplash_url should pass category as query parameter."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b'{"urls": {"full": "https://images.unsplash.com/nature.jpg"}}'
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        url = wchanger.fetch_unsplash_url(category="mountains", access_key="my_key")
+        self.assertEqual(url, "https://images.unsplash.com/nature.jpg")
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertIn("query=mountains", req.full_url)
+
+    @patch("wchanger.get_unsplash_access_key", return_value=None)
+    def test_fetch_unsplash_url_missing_key(self, mock_get_key: MagicMock) -> None:
+        """fetch_unsplash_url should raise ValueError with tutorial link when no key is set."""
+        with self.assertRaises(ValueError) as ctx:
+            wchanger.fetch_unsplash_url(access_key=None)
+        self.assertIn("Unsplash API requires an Access Key", str(ctx.exception))
+        self.assertIn("https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide", str(ctx.exception))
+
+    @patch("wchanger.urlopen")
+    def test_fetch_unsplash_url_unauthorized_401(self, mock_urlopen: MagicMock) -> None:
+        """fetch_unsplash_url should raise helpful error on HTTP 401 Unauthorized."""
+        mock_urlopen.side_effect = HTTPError(
+            url="https://api.unsplash.com/photos/random",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=None,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            wchanger.fetch_unsplash_url(access_key="invalid_key")
+        self.assertIn("Unsplash API authentication failed (HTTP 401 Unauthorized)", str(ctx.exception))
+        self.assertIn("https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide", str(ctx.exception))
+
+    @patch("wchanger.urlopen")
+    def test_fetch_unsplash_url_forbidden_403(self, mock_urlopen: MagicMock) -> None:
+        """fetch_unsplash_url should raise rate limit error on HTTP 403 Forbidden."""
+        mock_urlopen.side_effect = HTTPError(
+            url="https://api.unsplash.com/photos/random",
+            code=403,
+            msg="Forbidden",
+            hdrs={},
+            fp=None,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            wchanger.fetch_unsplash_url(access_key="valid_key")
+        self.assertIn("rate limit exceeded (HTTP 403 Forbidden)", str(ctx.exception))
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_unsplash_with_key_flag(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI should accept --online unsplash with --unsplash-key and forward to cycle."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "--online", "unsplash", "--unsplash-key", "my_cli_key", "--no-repetition", "--no-config"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertEqual(mock_cycle.call_args.kwargs.get("provider"), "unsplash")
+        self.assertEqual(mock_cycle.call_args.kwargs.get("unsplash_key"), "my_cli_key")
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_unsplash_with_category(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI with --online unsplash and -C should not warn and should pass category."""
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "--online", "unsplash", "--unsplash-key", "test_key", "-C", "space", "--no-repetition", "--no-config"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.assertNotIn("The --category option applies only to", result.output)
+        mock_cycle.assert_called_once()
+        self.assertEqual(mock_cycle.call_args.kwargs.get("category"), "space")
+
+    @patch("wchanger.urlopen")
+    def test_fetch_unsplash_url_all_category(self, mock_urlopen: MagicMock) -> None:
+        """fetch_unsplash_url with category 'all' should not append query parameter."""
+        fake_response = MagicMock()
+        fake_response.read.return_value = b'{"urls": {"full": "https://images.unsplash.com/random.jpg"}}'
+        fake_response.__enter__.return_value = fake_response
+        mock_urlopen.return_value = fake_response
+
+        url = wchanger.fetch_unsplash_url(category="all", access_key="my_key")
+        self.assertEqual(url, "https://images.unsplash.com/random.jpg")
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertNotIn("query=", req.full_url)
+
+    def test_unsplash_categories_defined(self) -> None:
+        """UNSPLASH_CATEGORIES should include core categories."""
+        for cat in ("nature", "wallpapers", "travel", "architecture", "space", "all"):
+            self.assertIn(cat, wchanger.UNSPLASH_CATEGORIES)
+
+    @patch("wchanger.run_online_wallpaper_cycle")
+    @patch("wchanger.verify_system_requirements")
+    def test_cli_config_unsplash_category(
+        self, mock_verify: MagicMock, mock_cycle: MagicMock
+    ) -> None:
+        """CLI should load unsplash_category from config file when using unsplash provider."""
+        cfg_path = self.test_dir / "unsplash_cfg.toml"
+        cfg_path.write_text(
+            'source = "unsplash"\nunsplash_access_key = "cfg_key"\nunsplash_category = "architecture"\n',
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            wchanger.cli,
+            ["--gnome", "--config", str(cfg_path), "--no-repetition"],
+        )
+        self.assertEqual(result.exit_code, 0)
+        mock_cycle.assert_called_once()
+        self.assertEqual(mock_cycle.call_args.kwargs.get("provider"), "unsplash")
+        self.assertEqual(mock_cycle.call_args.kwargs.get("category"), "architecture")
 
 
 if __name__ == "__main__":

@@ -28,12 +28,17 @@ shuffle = true
 # Search for wallpapers recursively across subfolders
 recursive = false
 
-# Wallpaper source: "folder" for local images, or "wallhaven", "bing", "picsum", "loremflickr"
+# Wallpaper source: "folder" for local images, or "wallhaven", "unsplash", "bing", "picsum", "loremflickr"
 source = "wallhaven"
 
-# Category or keyword filter (applies only to "wallhaven" online provider)
-# Popular choices: "nature", "space", "anime", "cyberpunk", "city", "cars", "gaming", "minimalism", "general", "all"
-# Custom keywords: e.g. "forest", "mountains", "abstract", etc.
+# Unsplash Personal API Access Key (required when source = "unsplash")
+# Obtain a free key from https://unsplash.com/developers (see README.md tutorial)
+# unsplash_access_key = "YOUR_UNSPLASH_ACCESS_KEY"
+
+# Category or search query filter (applies to "wallhaven" and "unsplash" online providers)
+# Wallhaven choices: "nature", "space", "anime", "cyberpunk", "city", "cars", "gaming", "minimalism", "general", "all"
+# Unsplash choices:  "nature", "wallpapers", "travel", "architecture", "space", "minimalism", "animals", "textures", "city", "technology", "all"
+# Custom keywords:   e.g. "forest", "mountains", "abstract", etc.
 category = "nature"
 
 # Maximum number of downloaded online wallpapers to retain in cache

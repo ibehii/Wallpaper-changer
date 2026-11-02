@@ -228,8 +228,8 @@ export default class WchangerPreferences extends ExtensionPreferences {
         });
         page.add(onlineGroup);
 
-        const providers = ['wallhaven', 'bing', 'picsum', 'loremflickr'];
-        const providerNames = [_('Wallhaven'), _('Bing Daily Photo'), _('Lorem Picsum (Random)'), _('LoremFlickr (Nature)')];
+        const providers = ['wallhaven', 'unsplash', 'bing', 'picsum', 'loremflickr'];
+        const providerNames = [_('Wallhaven'), _('Unsplash (API Key Required)'), _('Bing Daily Photo'), _('Lorem Picsum (Random)'), _('LoremFlickr (Nature)')];
         const stringList = Gtk.StringList.new(providerNames);
 
         const currentProvider = (hasKey('default-provider') ? settings.get_string('default-provider') : '') || 'wallhaven';
@@ -324,12 +324,131 @@ export default class WchangerPreferences extends ExtensionPreferences {
             });
         }
 
-        const updateWallhavenSensitivity = (provider) => {
+        let unsplashKeyRow = null;
+        let unsplashGuideRow = null;
+
+        if (hasKey('unsplash-access-key')) {
+            const EntryClass = Adw.PasswordEntryRow || Adw.EntryRow;
+            unsplashKeyRow = new EntryClass({
+                title: _('Unsplash Access Key'),
+            });
+            settings.bind('unsplash-access-key', unsplashKeyRow, 'text', Gio.SettingsBindFlags.DEFAULT);
+
+            unsplashGuideRow = new Adw.ActionRow({
+                title: _('Unsplash Setup & API Key Guide'),
+                subtitle: _('Click to view the tutorial in README.md on getting a free API key.'),
+                activatable: true,
+            });
+
+            const openTutorial = () => {
+                try {
+                    Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
+                } catch (e) {
+                    logError(e, '[wchanger-prefs] Error opening tutorial');
+                }
+            };
+            const openGuideButton = new Gtk.Button({
+                icon_name: 'emblem-default-symbolic',
+                valign: Gtk.Align.CENTER,
+                tooltip_text: _('Open tutorial in browser'),
+            });
+            openGuideButton.connect('clicked', openTutorial);
+            unsplashGuideRow.add_suffix(openGuideButton);
+            unsplashGuideRow.connect('activated', openTutorial);
+        }
+
+        // Unsplash Categories
+        const unsplashCategories = [
+            { id: 'nature', name: _('Nature & Landscapes') },
+            { id: 'wallpapers', name: _('Desktop Wallpapers') },
+            { id: 'travel', name: _('Travel & Exploration') },
+            { id: 'architecture', name: _('Architecture & Interiors') },
+            { id: 'space', name: _('Space & Astronomy') },
+            { id: 'minimalism', name: _('Minimalism') },
+            { id: 'animals', name: _('Animals & Wildlife') },
+            { id: 'textures', name: _('Textures & Patterns') },
+            { id: 'city', name: _('Street & City') },
+            { id: 'technology', name: _('Technology & Cyber') },
+            { id: 'all', name: _('All (Random)') },
+        ];
+        const unsplashCatNames = unsplashCategories.map(c => c.name);
+        const unsplashCatStringList = Gtk.StringList.new(unsplashCatNames);
+
+        let unsplashCategoryRow = null;
+        let unsplashCustomCatRow = null;
+
+        if (hasKey('unsplash-category')) {
+            const currentUnsplashCategory = settings.get_string('unsplash-category') || 'nature';
+            let currentUnsplashCatIndex = unsplashCategories.findIndex(c => c.id === currentUnsplashCategory);
+            if (currentUnsplashCatIndex < 0) {
+                currentUnsplashCatIndex = 0;
+            }
+
+            unsplashCategoryRow = new Adw.ComboRow({
+                title: _('Unsplash Category'),
+                subtitle: _('Select curated photo category or theme when Unsplash is used.'),
+                model: unsplashCatStringList,
+                selected: currentUnsplashCatIndex,
+            });
+
+            unsplashCustomCatRow = new Adw.EntryRow({
+                title: _('Custom Unsplash Search Query'),
+                text: currentUnsplashCategory,
+                show_apply_button: true,
+            });
+
+            let updatingUnsplashCategory = false;
+            unsplashCategoryRow.connect('notify::selected', (widget) => {
+                if (updatingUnsplashCategory) return;
+                const selectedIdx = widget.selected;
+                if (selectedIdx >= 0 && selectedIdx < unsplashCategories.length) {
+                    const chosenCat = unsplashCategories[selectedIdx].id;
+                    updatingUnsplashCategory = true;
+                    settings.set_string('unsplash-category', chosenCat);
+                    unsplashCustomCatRow.set_text(chosenCat);
+                    updatingUnsplashCategory = false;
+                }
+            });
+
+            unsplashCustomCatRow.connect('apply', (entry) => {
+                if (updatingUnsplashCategory) return;
+                const val = entry.get_text().trim().toLowerCase();
+                if (val.length > 0) {
+                    updatingUnsplashCategory = true;
+                    settings.set_string('unsplash-category', val);
+                    const idx = unsplashCategories.findIndex(c => c.id === val);
+                    if (idx >= 0) {
+                        unsplashCategoryRow.set_selected(idx);
+                    }
+                    updatingUnsplashCategory = false;
+                }
+            });
+
+            settings.connect('changed::unsplash-category', () => {
+                if (updatingUnsplashCategory) return;
+                updatingUnsplashCategory = true;
+                const newCat = settings.get_string('unsplash-category') || 'nature';
+                unsplashCustomCatRow.set_text(newCat);
+                const idx = unsplashCategories.findIndex(c => c.id === newCat);
+                if (idx >= 0) {
+                    unsplashCategoryRow.set_selected(idx);
+                }
+                updatingUnsplashCategory = false;
+            });
+        }
+
+        const updateProviderSensitivity = (provider) => {
             const isWallhaven = (provider === 'wallhaven');
-            if (categoryRow) categoryRow.set_sensitive(isWallhaven);
-            if (customCatRow) customCatRow.set_sensitive(isWallhaven);
+            if (categoryRow) categoryRow.set_visible(isWallhaven);
+            if (customCatRow) customCatRow.set_visible(isWallhaven);
+
+            const isUnsplash = (provider === 'unsplash');
+            if (unsplashKeyRow) unsplashKeyRow.set_visible(isUnsplash);
+            if (unsplashGuideRow) unsplashGuideRow.set_visible(isUnsplash);
+            if (unsplashCategoryRow) unsplashCategoryRow.set_visible(isUnsplash);
+            if (unsplashCustomCatRow) unsplashCustomCatRow.set_visible(isUnsplash);
         };
-        updateWallhavenSensitivity(currentProvider);
+        updateProviderSensitivity(currentProvider);
 
         providerRow.connect('notify::selected', (widget) => {
             const selectedIdx = widget.selected;
@@ -338,13 +457,17 @@ export default class WchangerPreferences extends ExtensionPreferences {
                 if (hasKey('default-provider')) {
                     settings.set_string('default-provider', prov);
                 }
-                updateWallhavenSensitivity(prov);
+                updateProviderSensitivity(prov);
             }
         });
 
         onlineGroup.add(providerRow);
         if (categoryRow) onlineGroup.add(categoryRow);
         if (customCatRow) onlineGroup.add(customCatRow);
+        if (unsplashKeyRow) onlineGroup.add(unsplashKeyRow);
+        if (unsplashGuideRow) onlineGroup.add(unsplashGuideRow);
+        if (unsplashCategoryRow) onlineGroup.add(unsplashCategoryRow);
+        if (unsplashCustomCatRow) onlineGroup.add(unsplashCustomCatRow);
 
         // Group 5: Automatic Background Rotator
         const rotatorGroup = new Adw.PreferencesGroup({

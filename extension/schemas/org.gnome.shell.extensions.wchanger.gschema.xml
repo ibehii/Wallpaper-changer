@@ -14,7 +14,12 @@
     <key name="default-provider" type="s">
       <default>"wallhaven"</default>
       <summary>Default online provider</summary>
-      <description>Provider used when fetching online wallpapers (wallhaven, bing, picsum, loremflickr).</description>
+      <description>Provider used when fetching online wallpapers (wallhaven, unsplash, bing, picsum, loremflickr).</description>
+    </key>
+    <key name="unsplash-access-key" type="s">
+      <default>""</default>
+      <summary>Unsplash API Access Key</summary>
+      <description>Personal API Access Key from unsplash.com/developers for fetching wallpapers from Unsplash.</description>
     </key>
     <key name="enable-multi-monitor" type="b">
       <default>false</default>
@@ -60,6 +65,11 @@
       <default>"nature"</default>
       <summary>Wallhaven wallpaper category or query</summary>
       <description>Category or keyword tag used when fetching wallpapers from Wallhaven (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general, all).</description>
+    </key>
+    <key name="unsplash-category" type="s">
+      <default>"nature"</default>
+      <summary>Unsplash wallpaper category or query</summary>
+      <description>Category or search query used when fetching wallpapers from Unsplash (e.g. nature, wallpapers, travel, architecture, space, minimalism, animals, textures, city, technology, all).</description>
     </key>
   </schema>
 </schemalist>

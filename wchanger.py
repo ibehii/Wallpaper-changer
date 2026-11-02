@@ -20,6 +20,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
@@ -79,7 +80,8 @@ DEFAULT_PAUSE_SECONDS = 60
 DEFAULT_KEEP_LAST = 20
 DEFAULT_CONFIG_FILENAME = "config.toml"
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "wchanger"
-ONLINE_PROVIDER_CHOICES = ("wallhaven", "bing", "picsum", "loremflickr")
+ONLINE_PROVIDER_CHOICES = ("wallhaven", "unsplash", "bing", "picsum", "loremflickr")
+UNSPLASH_SETUP_URL = "https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide"
 WALLHAVEN_CATEGORIES = (
     "nature",
     "space",
@@ -90,6 +92,19 @@ WALLHAVEN_CATEGORIES = (
     "gaming",
     "minimalism",
     "general",
+    "all",
+)
+UNSPLASH_CATEGORIES = (
+    "nature",
+    "wallpapers",
+    "travel",
+    "architecture",
+    "space",
+    "minimalism",
+    "animals",
+    "textures",
+    "city",
+    "technology",
     "all",
 )
 
@@ -1472,16 +1487,205 @@ def fetch_loremflickr_url() -> str:
     return f"https://loremflickr.com/1920/1080/nature?lock={random_lock}"
 
 
+def get_unsplash_access_key(
+    explicit_key: str | None = None,
+    config_settings: dict[str, object] | None = None,
+) -> str | None:
+    """Resolve Unsplash Access Key from CLI argument, environment variable, config file, or GSettings."""
+    if explicit_key and explicit_key.strip():
+        return explicit_key.strip()
+
+    env_key = os.environ.get("UNSPLASH_ACCESS_KEY") or os.environ.get("UNSPLASH_API_KEY")
+    if env_key and env_key.strip():
+        return env_key.strip()
+
+    settings = config_settings if config_settings is not None else load_config_file()
+    config_key = settings.get("unsplash_access_key") or settings.get("unsplash_api_key")
+    if config_key and str(config_key).strip():
+        return str(config_key).strip()
+
+    try:
+        gsettings_binary = shutil.which("gsettings")
+        if gsettings_binary:
+            proc = subprocess.run(
+                [gsettings_binary, "get", "org.gnome.shell.extensions.wchanger", "unsplash-access-key"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if proc.returncode == 0:
+                extracted = proc.stdout.strip().strip("'\"")
+                if extracted:
+                    return extracted
+
+            candidate_schemadirs = [
+                Path.home() / ".local/share/gnome-shell/extensions/wchanger@ibehii.github.com/schemas",
+                Path(__file__).resolve().parent / "extension" / "schemas",
+            ]
+            for sdir in candidate_schemadirs:
+                if (sdir / "gschemas.compiled").exists():
+                    proc = subprocess.run(
+                        [gsettings_binary, "--schemadir", str(sdir), "get", "org.gnome.shell.extensions.wchanger", "unsplash-access-key"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=False,
+                    )
+                    if proc.returncode == 0:
+                        extracted = proc.stdout.strip().strip("'\"")
+                        if extracted:
+                            return extracted
+    except Exception:
+        pass
+
+    return None
+
+
+def save_unsplash_access_key_to_config(api_key: str, config_path: Path | None = None) -> Path:
+    """Persist Unsplash Access Key to config.toml without overwriting existing settings."""
+    clean_key = api_key.strip()
+    target_path = Path(config_path) if config_path is not None else get_default_config_path()
+    if not target_path.exists():
+        target_path = Path.home() / ".config" / "wchanger" / DEFAULT_CONFIG_FILENAME
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    content = ""
+    if target_path.exists():
+        try:
+            content = target_path.read_text(encoding="utf-8")
+        except OSError:
+            content = ""
+
+    key_line = f'unsplash_access_key = "{clean_key}"\n'
+    if re.search(r"^\s*#?\s*unsplash_access_key\s*=.*$", content, flags=re.MULTILINE):
+        new_content = re.sub(
+            r"^\s*#?\s*unsplash_access_key\s*=.*$",
+            f'unsplash_access_key = "{clean_key}"',
+            content,
+            flags=re.MULTILINE,
+        )
+    elif re.search(r"^\s*#?\s*unsplash_api_key\s*=.*$", content, flags=re.MULTILINE):
+        new_content = re.sub(
+            r"^\s*#?\s*unsplash_api_key\s*=.*$",
+            f'unsplash_access_key = "{clean_key}"',
+            content,
+            flags=re.MULTILINE,
+        )
+    else:
+        new_content = content + ("\n" if content and not content.endswith("\n") else "") + key_line
+
+    target_path.write_text(new_content, encoding="utf-8")
+    return target_path
+
+
+def trigger_unsplash_download_tracking(download_location_url: str, access_key: str) -> None:
+    """Trigger Unsplash API download tracking endpoint in a background daemon thread per API guidelines."""
+    def _track() -> None:
+        try:
+            _ensure_urllib()
+            request = Request(
+                download_location_url,
+                headers={
+                    "Authorization": f"Client-ID {access_key}",
+                    "User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)",
+                },
+            )
+            with urlopen(request, timeout=10) as response:
+                response.read()
+        except Exception as track_err:
+            logging.debug(f"Unsplash download tracking ping failed: {track_err}")
+
+    tracking_thread = threading.Thread(target=_track, daemon=True)
+    tracking_thread.start()
+
+
+def fetch_unsplash_url(
+    category: str | None = None,
+    access_key: str | None = None,
+    max_retries: int = 3,
+    retry_delay_seconds: float = 0.5,
+) -> str:
+    """Fetch a random wallpaper image URL from the Unsplash API with retries and category support."""
+    _ensure_urllib()
+    resolved_key = get_unsplash_access_key(explicit_key=access_key)
+    if not resolved_key:
+        raise ValueError(
+            "Unsplash API requires an Access Key. Please provide one via config.toml "
+            "('unsplash_access_key'), UNSPLASH_ACCESS_KEY environment variable, or --unsplash-key.\n"
+            f"See README.md for the Unsplash setup tutorial: {UNSPLASH_SETUP_URL}"
+        )
+
+    api_url = "https://api.unsplash.com/photos/random"
+    params: dict[str, str] = {
+        "orientation": "landscape",
+        "content_filter": "high",
+    }
+    if category and category.strip():
+        cat_clean = category.strip()
+        if cat_clean.lower() != "all":
+            params["query"] = cat_clean
+
+    full_url = f"{api_url}?{urlencode(params)}"
+    request = Request(
+        full_url,
+        headers={
+            "Authorization": f"Client-ID {resolved_key}",
+            "Accept-Version": "v1",
+            "User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)",
+        },
+    )
+
+    try:
+        raw_payload = _fetch_url_with_retry(
+            request,
+            timeout=15,
+            max_retries=max_retries,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+    except HTTPError as http_error:
+        if http_error.code == 401:
+            raise ValueError(
+                "Unsplash API authentication failed (HTTP 401 Unauthorized).\n"
+                "Your Access Key is invalid or expired. Check https://unsplash.com/developers "
+                "and update your key in config.toml or UNSPLASH_ACCESS_KEY environment variable.\n"
+                f"See tutorial: {UNSPLASH_SETUP_URL}"
+            ) from http_error
+        if http_error.code == 403:
+            raise ValueError(
+                "Unsplash API request forbidden or hourly rate limit exceeded (HTTP 403 Forbidden).\n"
+                "Free tier development apps are limited to 50 requests/hour."
+            ) from http_error
+        raise
+
+    payload = json.loads(raw_payload.decode("utf-8"))
+    urls = payload.get("urls", {})
+    image_url = urls.get("full") or urls.get("raw") or urls.get("regular")
+    if not image_url:
+        raise ValueError("Unsplash API response missing photo image URL.")
+
+    download_location = payload.get("links", {}).get("download_location")
+    if download_location:
+        trigger_unsplash_download_tracking(download_location, resolved_key)
+
+    return str(image_url)
+
+
 ONLINE_PROVIDERS = {
     "wallhaven": fetch_wallhaven_url,
+    "unsplash": fetch_unsplash_url,
     "bing": fetch_bing_url,
     "picsum": fetch_picsum_url,
     "loremflickr": fetch_loremflickr_url,
 }
 
 
-def get_online_wallpaper_url(provider: str, category: str | None = None) -> str:
-    """Get next wallpaper URL from an online provider, passing category to Wallhaven if specified."""
+def get_online_wallpaper_url(
+    provider: str,
+    category: str | None = None,
+    access_key: str | None = None,
+) -> str:
+    """Get next wallpaper URL from an online provider, passing category or access key if supported."""
     provider_key = provider.lower()
     fetcher = ONLINE_PROVIDERS.get(provider_key)
     if fetcher is None:
@@ -1489,6 +1693,11 @@ def get_online_wallpaper_url(provider: str, category: str | None = None) -> str:
     if provider_key == "wallhaven" and category:
         try:
             return fetcher(category=category)
+        except TypeError:
+            return fetcher()
+    if provider_key == "unsplash":
+        try:
+            return fetcher(category=category, access_key=access_key)
         except TypeError:
             return fetcher()
     return fetcher()
@@ -1574,7 +1783,7 @@ def get_prefetch_candidate(
 
     provider_key = provider.lower()
     cat_part = ""
-    if provider_key == "wallhaven" and category:
+    if provider_key in ("wallhaven", "unsplash") and category:
         cat_clean = re.sub(r"[^a-zA-Z0-9_-]", "", category.strip().lower())
         if cat_clean:
             cat_part = f"_{cat_clean}"
@@ -1607,6 +1816,7 @@ def prefetch_online_wallpaper(
     cache_dir: Path | str | None = None,
     multi_monitor: bool = False,
     desktop_environment: str | None = None,
+    access_key: str | None = None,
 ) -> list[Path]:
     """Download the next candidate wallpaper from an online provider into the prefetch cache."""
     provider_key = provider.lower()
@@ -1621,14 +1831,14 @@ def prefetch_online_wallpaper(
     prefetched_paths: list[Path] = []
 
     cat_part = ""
-    if provider_key == "wallhaven" and category:
+    if provider_key in ("wallhaven", "unsplash") and category:
         cat_clean = re.sub(r"[^a-zA-Z0-9_-]", "", category.strip().lower())
         if cat_clean:
             cat_part = f"_{cat_clean}"
 
     for idx in range(monitor_count):
         try:
-            image_url = get_online_wallpaper_url(provider_key, category=category)
+            image_url = get_online_wallpaper_url(provider_key, category=category, access_key=access_key)
             parsed_path = Path(urlparse(image_url).path).suffix.lower()
             extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
             suffix = f"_m{idx}" if multi_monitor else ""
@@ -1653,11 +1863,10 @@ def spawn_background_prefetch(
     target_cache_dir: Path | str | None = None,
     multi_monitor: bool = False,
     desktop_environment: str | None = None,
+    access_key: str | None = None,
 ) -> None:
     """Spawn an asynchronous background job to prefetch the next online wallpaper."""
     try:
-        import subprocess
-
         cmd = [
             sys.executable,
             str(Path(__file__).resolve()),
@@ -1666,8 +1875,10 @@ def spawn_background_prefetch(
             "--no-config",
             "--prefetch-only",
         ]
-        if category and provider.lower() == "wallhaven":
+        if category and provider.lower() in ("wallhaven", "unsplash"):
             cmd.extend(["-C", category])
+        if access_key and provider.lower() == "unsplash":
+            cmd.extend(["--unsplash-key", access_key])
         if multi_monitor:
             cmd.append("--multi-monitor")
         if desktop_environment:
@@ -1940,6 +2151,7 @@ def run_online_wallpaper_cycle(
     keep_last: int = DEFAULT_KEEP_LAST,
     multi_monitor: bool = False,
     prefetch: bool = True,
+    unsplash_key: str | None = None,
 ) -> None:
     """Cycle wallpapers from an online provider in a loop with error handling, prefetch caching, and cache cleanup."""
     provider_key = provider.lower()
@@ -1947,9 +2159,19 @@ def run_online_wallpaper_cycle(
     if fetcher is None:
         raise ValueError(f"Unknown online provider '{provider}'.")
 
+    resolved_unsplash_key: str | None = None
+    if provider_key == "unsplash":
+        resolved_unsplash_key = get_unsplash_access_key(explicit_key=unsplash_key)
+        if not resolved_unsplash_key:
+            raise ValueError(
+                "Unsplash API requires an Access Key. Please provide one via config.toml "
+                "('unsplash_access_key'), UNSPLASH_ACCESS_KEY environment variable, or --unsplash-key.\n"
+                f"See README.md for the Unsplash setup tutorial: {UNSPLASH_SETUP_URL}"
+            )
+
     target_cache_dir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
     target_cache_dir.mkdir(parents=True, exist_ok=True)
-    cat_desc = f" (category: '{category}')" if category and provider_key == "wallhaven" else ""
+    cat_desc = f" (category: '{category}')" if category and provider_key in ("wallhaven", "unsplash") else ""
 
     try:
         while True:
@@ -1970,7 +2192,11 @@ def run_online_wallpaper_cycle(
                         if output_mode != "log":
                             print(f"{CYAN}[i] Fetching online wallpaper from '{provider_key}'{cat_desc}...{RESET}")
 
-                        image_url = get_online_wallpaper_url(provider_key, category=category)
+                        image_url = get_online_wallpaper_url(
+                            provider_key,
+                            category=category,
+                            access_key=resolved_unsplash_key,
+                        )
                         image_url_info = image_url
                         parsed_path = Path(urlparse(image_url).path).suffix.lower()
                         extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
@@ -2008,6 +2234,7 @@ def run_online_wallpaper_cycle(
                                 target_cache_dir=target_cache_dir,
                                 multi_monitor=False,
                                 desktop_environment=desktop_environment,
+                                access_key=resolved_unsplash_key,
                             )
                     else:
                         failure_message = f"Failed to set online wallpaper to desktop ({desktop_environment})."
@@ -2057,7 +2284,11 @@ def run_online_wallpaper_cycle(
                             )
 
                         for monitor_index in range(monitor_count):
-                            image_url = get_online_wallpaper_url(provider_key, category=category)
+                            image_url = get_online_wallpaper_url(
+                            provider_key,
+                            category=category,
+                            access_key=resolved_unsplash_key,
+                        )
                             wallpaper_urls.append(image_url)
                             parsed_path = Path(urlparse(image_url).path).suffix.lower()
                             extension = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
@@ -2094,6 +2325,7 @@ def run_online_wallpaper_cycle(
                                 target_cache_dir=target_cache_dir,
                                 multi_monitor=True,
                                 desktop_environment=desktop_environment,
+                                access_key=resolved_unsplash_key,
                             )
                     else:
                         failure_message = f"Failed to set online wallpapers to desktop ({desktop_environment})."
@@ -2161,6 +2393,7 @@ def setup_install_autostart_service(
     keep_last: int | None = None,
     config_settings: dict[str, object] | None = None,
     multi_monitor: bool = False,
+    unsplash_key: str | None = None,
 ) -> None:
     """Interactive wizard to generate and install a systemd unit via sudo tee."""
     click.secho(
@@ -2271,8 +2504,10 @@ def setup_install_autostart_service(
         command_tokens.append("--multi-monitor")
     if online_provider:
         command_tokens.extend(["--online", online_provider.lower()])
-        if category and online_provider.lower() == "wallhaven":
+        if category and online_provider.lower() in ("wallhaven", "unsplash"):
             command_tokens.extend(["-C", category])
+        if online_provider.lower() == "unsplash" and unsplash_key:
+            command_tokens.extend(["--unsplash-key", unsplash_key])
         if keep_last is not None:
             command_tokens.extend(["--keep-last", str(keep_last)])
     elif chosen_directory is not None:
@@ -2301,6 +2536,10 @@ def setup_install_autostart_service(
         extra_environment_lines.append(f"Environment=XDG_CURRENT_DESKTOP={os.environ['XDG_CURRENT_DESKTOP']}")
     if "DESKTOP_SESSION" in os.environ:
         extra_environment_lines.append(f"Environment=DESKTOP_SESSION={os.environ['DESKTOP_SESSION']}")
+    if "UNSPLASH_ACCESS_KEY" in os.environ:
+        extra_environment_lines.append(f"Environment=UNSPLASH_ACCESS_KEY={os.environ['UNSPLASH_ACCESS_KEY']}")
+    elif "UNSPLASH_API_KEY" in os.environ:
+        extra_environment_lines.append(f"Environment=UNSPLASH_ACCESS_KEY={os.environ['UNSPLASH_API_KEY']}")
     extra_environment_block = ("\n" + "\n".join(extra_environment_lines)) if extra_environment_lines else ""
 
     service_definition = f"""[Unit]
@@ -2439,20 +2678,25 @@ setup_install_autostart = setup_install_autostart_service
     "--online",
     type=click.Choice(ONLINE_PROVIDER_CHOICES, case_sensitive=False),
     default=None,
-    help="Fetch wallpapers online from a provider (wallhaven, bing, picsum, loremflickr).",
+    help="Fetch wallpapers online from a provider (wallhaven, unsplash, bing, picsum, loremflickr).",
 )
 @click.option(
     "--category",
     "-C",
     "category",
     default=None,
-    help="Category or keyword filter for Wallhaven online provider (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general, all).",
+    help="Category or keyword filter for Wallhaven or Unsplash online provider (e.g. nature, space, anime, cyberpunk, city, cars, gaming, minimalism, general, all).",
+)
+@click.option(
+    "--unsplash-key",
+    default=None,
+    help="Personal API Access Key for Unsplash (can also be configured in config.toml or UNSPLASH_ACCESS_KEY env variable).",
 )
 @click.option(
     "--source",
     type=click.Choice(["folder", "local", *ONLINE_PROVIDER_CHOICES], case_sensitive=False),
     default=None,
-    help="Wallpaper source: local 'folder' or online provider ('wallhaven', 'bing', 'picsum', 'loremflickr').",
+    help="Wallpaper source: local 'folder' or online provider ('wallhaven', 'unsplash', 'bing', 'picsum', 'loremflickr').",
 )
 @click.option(
     "--shuffle/--no-shuffle",
@@ -2547,6 +2791,7 @@ def cli(
     prefetch: bool,
     prefetch_only: bool,
     photo_path: Path | None,
+    unsplash_key: str | None = None,
     multi_monitor: bool = False,
 ) -> None:
     """Anahita Wallpaper Changer (wchanger).
@@ -2636,12 +2881,14 @@ def cli(
     if prefetch_only:
         target_provider = online or str(config_settings.get("online", "wallhaven"))
         target_category = category
+        target_key = get_unsplash_access_key(explicit_key=unsplash_key, config_settings=config_settings)
         prefetch_online_wallpaper(
             provider=target_provider,
             category=target_category,
             cache_dir=custom_cache_dir,
             multi_monitor=multi_monitor,
             desktop_environment=desktop_override,
+            access_key=target_key,
         )
         sys.exit(0)
 
@@ -2669,13 +2916,55 @@ def cli(
         elif config_source in ("folder", "local"):
             effective_online_provider = None
 
-    if category and effective_online_provider != "wallhaven" and output != "log" and not run_background:
+    if not category_from_cli and effective_online_provider == "unsplash" and "unsplash_category" in config_settings:
+        custom_unsplash_cat = str(config_settings["unsplash_category"]).strip()
+        if custom_unsplash_cat:
+            category = custom_unsplash_cat
+
+    if category and effective_online_provider not in ("wallhaven", "unsplash") and output != "log" and not run_background:
         provider_display = effective_online_provider or "local folder mode"
         click.secho(
-            f"[!] Notice: The --category option applies only to 'wallhaven' and will be ignored for '{provider_display}'.",
+            f"[!] Notice: The --category option applies only to 'wallhaven' and 'unsplash' and will be ignored for '{provider_display}'.",
             fg="yellow",
             err=True,
         )
+
+    if effective_online_provider == "unsplash":
+        resolved_key = get_unsplash_access_key(explicit_key=unsplash_key, config_settings=config_settings)
+        if not resolved_key and not run_background and sys.stdin.isatty():
+            click.secho(
+                f"\n[!] Unsplash requires a free API Access Key from https://unsplash.com/developers\n"
+                f"    For setup instructions, see: {UNSPLASH_SETUP_URL}",
+                fg="yellow",
+            )
+            entered_key = click.prompt(
+                f"{GREEN}[+] Please enter your Unsplash Access Key{RESET}",
+                type=str,
+            ).strip()
+            if entered_key:
+                try:
+                    if click.confirm(
+                        f"{GREEN}[+] Save this key to config.toml so you never have to re-enter it?{RESET}",
+                        default=True,
+                    ):
+                        saved_file = save_unsplash_access_key_to_config(entered_key, config_path=config_file)
+                        click.secho(f"[+] Saved Unsplash Access Key to {saved_file}", fg="green")
+                except Exception:
+                    pass
+                unsplash_key = entered_key
+                resolved_key = entered_key
+        if not resolved_key and not install_autostart:
+            click.secho(
+                f"\nError: Unsplash provider requires an Access Key.\n"
+                f"Obtain a free key at: https://unsplash.com/developers\n"
+                f"Configure it via config.toml (unsplash_access_key = '...'), "
+                f"UNSPLASH_ACCESS_KEY environment variable, or --unsplash-key.\n"
+                f"See tutorial: {UNSPLASH_SETUP_URL}",
+                fg="red",
+                bold=True,
+                err=True,
+            )
+            sys.exit(1)
 
     if install_autostart:
         setup_install_autostart_service(
@@ -2689,6 +2978,7 @@ def cli(
             keep_last=keep_last,
             config_settings=config_settings,
             multi_monitor=multi_monitor,
+            unsplash_key=unsplash_key,
         )
         return
 
@@ -2790,6 +3080,7 @@ def cli(
                 keep_last=keep_last,
                 multi_monitor=multi_monitor,
                 prefetch=prefetch,
+                unsplash_key=unsplash_key,
             )
             sys.exit(0)
 
@@ -2800,7 +3091,7 @@ def cli(
             + (" (forced via flag)" if desktop_override else " (auto-detected)")
             + f"{RESET}"
         )
-        cat_info = f" (category: '{category}')" if category and online_provider == "wallhaven" else ""
+        cat_info = f" (category: '{category}')" if category and online_provider in ("wallhaven", "unsplash") else ""
         print(f"{CYAN}[i] Wallpaper source: online provider '{online_provider}'{cat_info}{RESET}")
         print(f"{CYAN}[i] Tip: Customize settings in 'config.toml' or by passing command-line options (see README.md).{RESET}")
         if multi_monitor:
@@ -2819,6 +3110,7 @@ def cli(
             keep_last=keep_last,
             multi_monitor=multi_monitor,
             prefetch=prefetch,
+            unsplash_key=unsplash_key,
         )
         return
 
