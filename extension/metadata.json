@@ -1,6 +1,6 @@
 {
   "name": "Anahita Wallpaper Changer",
-  "description": "Seamless top-panel controls for Anahita Wallpaper Changer: Next, Previous, Favorite, online sources, multi-monitor, and background service management.",
+  "description": "Automatically change desktop wallpapers right from your top bar. Connects to popular online providers (Unsplash, Wallhaven, Bing) or local picture folders, featuring one-click Next/Previous controls, dynamic categories, and independent multi-monitor displays.",
   "uuid": "wchanger@ibehii.github.com",
   "shell-version": [
     "45",

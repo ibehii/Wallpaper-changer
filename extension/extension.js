@@ -2,219 +2,157 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
-import Clutter from 'gi://Clutter';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const GNOME_BG_SCHEMA = 'org.gnome.desktop.background';
 const MAX_HISTORY_ITEMS = 50;
 const SUPPORTED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.svg', '.tiff']);
 
-/**
- * Recursively or non-recursively enumerate image files in a directory.
- * Safely guards against circular symlinks, deep nesting, and limits file count for UI responsiveness.
- * Returns an array of absolute path strings.
- */
-function scanLocalPhotos(dirPath, recursive = false) {
-    const results = [];
-    if (!dirPath || typeof dirPath !== 'string') return results;
+function getLocalPhotos(dirPath, recursive = false) {
+    const path = dirPath?.replace(/^~/, GLib.get_home_dir())?.trim();
+    if (!path)
+        return [];
 
-    let expandedPath = dirPath.trim();
-    if (expandedPath.length === 0) return results;
-    if (expandedPath.startsWith('~')) {
-        expandedPath = `${GLib.get_home_dir()}${expandedPath.substring(1)}`;
-    }
+    const dir = Gio.File.new_for_path(path);
+    if (!dir.query_exists(null))
+        return [];
 
-    const dir = Gio.File.new_for_path(expandedPath);
     try {
-        if (!dir.query_exists(null)) return results;
-    } catch (e) {
-        return results;
-    }
+        const photos = [];
+        const enumerator = dir.enumerate_children(
+            'standard::name,standard::type',
+            Gio.FileQueryInfoFlags.NONE,
+            null
+        );
 
-    const visitedDirs = new Set();
-    const MAX_DEPTH = 6;
-    const MAX_FILES = 5000;
-
-    function _scan(directory, depth) {
-        if (depth > MAX_DEPTH || results.length >= MAX_FILES) return;
-
-        let dirPathStr;
-        try {
-            dirPathStr = directory.get_path();
-        } catch (e) {
-            return;
-        }
-        if (!dirPathStr || visitedDirs.has(dirPathStr)) return;
-        visitedDirs.add(dirPathStr);
-
-        let enumerator = null;
-        try {
-            enumerator = directory.enumerate_children(
-                'standard::name,standard::type,standard::is-symlink',
-                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
-                null
-            );
-        } catch (e) {
-            return;
-        }
-
-        try {
-            let info;
-            while ((info = enumerator.next_file(null)) !== null) {
-                if (results.length >= MAX_FILES) break;
-
-                const name = info.get_name();
-                if (!name || name.startsWith('.')) continue;
-
-                const child = directory.get_child(name);
-                const fileType = info.get_file_type();
-                const isSymlink = info.get_is_symlink();
-
-                if (fileType === Gio.FileType.REGULAR) {
-                    const lowerName = name.toLowerCase();
-                    const dotIndex = lowerName.lastIndexOf('.');
-                    if (dotIndex >= 0) {
-                        const ext = lowerName.substring(dotIndex);
-                        if (SUPPORTED_IMAGE_EXTENSIONS.has(ext)) {
-                            const childPath = child.get_path();
-                            if (childPath) results.push(childPath);
-                        }
-                    }
-                } else if (recursive && fileType === Gio.FileType.DIRECTORY && !isSymlink) {
-                    _scan(child, depth + 1);
-                }
+        let info;
+        while ((info = enumerator.next_file(null))) {
+            const name = info.get_name();
+            if (name.startsWith('.'))
+                continue;
+            const child = dir.get_child(name);
+            if (info.get_file_type() === Gio.FileType.REGULAR) {
+                const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+                if (SUPPORTED_IMAGE_EXTENSIONS.has(ext))
+                    photos.push(child.get_path());
+            } else if (recursive && info.get_file_type() === Gio.FileType.DIRECTORY) {
+                photos.push(...getLocalPhotos(child.get_path(), true));
             }
-        } catch (e) {
-            // Protect against directory read errors
-        } finally {
-            try {
-                if (enumerator) enumerator.close(null);
-            } catch (e) {}
         }
+        enumerator.close(null);
+        return photos;
+    } catch {
+        return [];
     }
-
-    _scan(dir, 0);
-    results.sort();
-    return results;
 }
 
-let _localPhotosCache = { dir: '', recursive: false, timestamp: 0, photos: [] };
-
-function getLocalPhotos(dirPath, recursive = false, forceRefresh = false) {
-    const now = Date.now();
-    if (!forceRefresh &&
-        _localPhotosCache.dir === dirPath &&
-        _localPhotosCache.recursive === recursive &&
-        (now - _localPhotosCache.timestamp) < 5000) {
-        return _localPhotosCache.photos;
-    }
-    const photos = scanLocalPhotos(dirPath, recursive);
-    _localPhotosCache = { dir: dirPath, recursive, timestamp: now, photos };
-    return photos;
-}
-
-/**
- * Execute an arbitrary command asynchronously with Gio.Subprocess
- */
 function runCommandAsync(argv, onFinished = null) {
     try {
         const proc = new Gio.Subprocess({
-            argv: argv,
-            flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            argv,
+            flags: onFinished
+                ? Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+                : Gio.SubprocessFlags.NONE,
         });
         proc.init(null);
-        proc.communicate_utf8_async(null, null, (procObj, res) => {
-            try {
-                const [, stdout, stderr] = procObj.communicate_utf8_finish(res);
-                const success = procObj.get_successful();
-                if (onFinished) {
-                    onFinished(success, stdout || '', stderr || '');
-                }
-            } catch (err) {
-                if (onFinished) {
+        if (onFinished) {
+            proc.communicate_utf8_async(null, null, (p, res) => {
+                try {
+                    const [, stdout, stderr] = p.communicate_utf8_finish(res);
+                    onFinished(p.get_successful(), stdout || '', stderr || '');
+                } catch (err) {
                     onFinished(false, '', err.message || '');
                 }
-            }
-        });
+            });
+        }
         return proc;
     } catch (e) {
-        logError(e, `[wchanger-extension] Failed to launch subprocess: ${argv.join(' ')}`);
-        if (onFinished) {
-            onFinished(false, '', e.message || '');
-        }
+        onFinished?.(false, '', e.message || '');
         return null;
     }
 }
 
-/**
- * Resolves the executable path/argv for wchanger across PATH, ~/.local/bin, /usr/local/bin, etc.
- */
 function getWchangerCommand(customPath = '') {
-    if (customPath && customPath.trim().length > 0) {
-        return [customPath.trim()];
+    const trimmed = customPath?.trim();
+    if (trimmed) {
+        try {
+            const [, argv] = GLib.shell_parse_argv(trimmed);
+            if (argv?.length)
+                return argv;
+        } catch (e) {
+            return [trimmed];
+        }
     }
 
-    if (GLib.find_program_in_path('wchanger')) {
+    if (GLib.find_program_in_path('wchanger'))
         return ['wchanger'];
-    }
 
     const home = GLib.get_home_dir();
-    const candidatePaths = [
+    const candidates = [
         `${home}/.local/bin/wchanger`,
         '/usr/local/bin/wchanger',
         '/usr/bin/wchanger',
         '/bin/wchanger',
     ];
 
-    for (const p of candidatePaths) {
-        if (GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE)) {
+    for (const p of candidates) {
+        if (GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE))
             return [p];
-        }
     }
 
-    // Fallback: check if dev repository script exists
-    const repoCandidate = `${home}/Dev/Wallpaper-changer/wchanger.py`;
-    if (GLib.file_test(repoCandidate, GLib.FileTest.EXISTS)) {
-        const pythonBin = GLib.find_program_in_path('python3') || 'python3';
-        return [pythonBin, repoCandidate];
+    const repoScript = `${home}/Dev/Wallpaper-changer/wchanger.py`;
+    if (GLib.file_test(repoScript, GLib.FileTest.EXISTS)) {
+        const python = GLib.find_program_in_path('python3') || 'python3';
+        return [python, repoScript];
     }
 
     return null;
 }
 
-/**
- * History & Favorite Store Manager
- * Persists history in ~/.cache/wchanger/history.json
- */
-class HistoryManager {
-    constructor() {
-        this._cacheDir = `${GLib.get_user_cache_dir()}/wchanger`;
-        this._historyFile = `${this._cacheDir}/history.json`;
-        this._history = [];
-        this._currentIndex = -1;
-        this._ensureCacheDir();
-        this._loadHistory();
+function resolveDirectory(customPath, defaultSubdir) {
+    let dir = customPath?.trim();
+    if (!dir) {
+        const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
+        dir = `${pics}/${defaultSubdir}`;
     }
+    if (dir.startsWith('~'))
+        dir = `${GLib.get_home_dir()}${dir.slice(1)}`;
 
-    _ensureCacheDir() {
-        const dir = Gio.File.new_for_path(this._cacheDir);
-        if (!dir.query_exists(null)) {
-            try {
-                dir.make_directory_with_parents(null);
-            } catch (e) {
-                // Ignore if already created
-            }
+    const file = Gio.File.new_for_path(dir);
+    if (!file.query_exists(null)) {
+        try {
+            file.make_directory_with_parents(null);
+        } catch {
+            // Non-fatal if directory creation fails
         }
     }
+    return dir;
+}
 
-    _loadHistory() {
+function openFolder(path) {
+    const file = Gio.File.new_for_path(path);
+    Gio.AppInfo.launch_default_for_uri(file.get_uri(), null);
+}
+
+class HistoryManager {
+    constructor() {
+        this._historyFile = `${GLib.get_user_cache_dir()}/wchanger/history.json`;
+        this._history = [];
+        this._currentIndex = -1;
+        this._load();
+    }
+
+    _load() {
         const file = Gio.File.new_for_path(this._historyFile);
-        if (file.query_exists(null)) {
+        if (!file.query_exists(null))
+            return;
+
+        file.load_contents_async(null, (fileObj, res) => {
             try {
-                const [ok, contents] = file.load_contents(null);
+                const [ok, contents] = fileObj.load_contents_finish(res);
                 if (ok) {
                     const data = JSON.parse(new TextDecoder().decode(contents));
                     if (Array.isArray(data.items)) {
@@ -222,59 +160,57 @@ class HistoryManager {
                         this._currentIndex = typeof data.currentIndex === 'number'
                             ? data.currentIndex
                             : this._history.length - 1;
-                        return;
                     }
                 }
-            } catch (e) {
-                // If corrupted, initialize fresh
+            } catch {
+                // Ignore unreadable or corrupt cache file
             }
-        }
-        this._history = [];
-        this._currentIndex = -1;
+        });
     }
 
-    _saveHistory() {
-        this._ensureCacheDir();
+    _save() {
         try {
-            const data = {
+            const dir = Gio.File.new_for_path(GLib.path_get_dirname(this._historyFile));
+            if (!dir.query_exists(null))
+                dir.make_directory_with_parents(null);
+
+            const file = Gio.File.new_for_path(this._historyFile);
+            const data = JSON.stringify({
                 items: this._history.slice(-MAX_HISTORY_ITEMS),
                 currentIndex: this._currentIndex,
-            };
-            const file = Gio.File.new_for_path(this._historyFile);
-            file.replace_contents(
-                JSON.stringify(data, null, 2),
+            }, null, 2);
+            file.replace_contents_bytes_async(
+                new GLib.Bytes(new TextEncoder().encode(data)),
                 null,
                 false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION,
+                null,
                 null
             );
-        } catch (e) {
-            logError(e, '[wchanger-extension] Failed to write history.json');
+        } catch {
+            // Non-critical cache write failure
         }
     }
 
     recordWallpaper(filePath) {
-        if (!filePath) return;
-
-        // If current position already matches the wallpaper, do nothing (prevents circular navigation bug)
-        if (this._currentIndex >= 0 && this._currentIndex < this._history.length && this._history[this._currentIndex] === filePath) {
+        if (!filePath)
             return;
-        }
 
-        // Avoid duplicate consecutive entries
+        if (this._currentIndex >= 0 && this._currentIndex < this._history.length && this._history[this._currentIndex] === filePath)
+            return;
+
         if (this._history.length > 0 && this._history[this._history.length - 1] === filePath) {
             this._currentIndex = this._history.length - 1;
-            this._saveHistory();
+            this._save();
             return;
         }
 
-        // If we backed up and now add a new wallpaper, append forward
         this._history.push(filePath);
-        if (this._history.length > MAX_HISTORY_ITEMS) {
+        if (this._history.length > MAX_HISTORY_ITEMS)
             this._history.shift();
-        }
+
         this._currentIndex = this._history.length - 1;
-        this._saveHistory();
+        this._save();
     }
 
     canGoBack() {
@@ -286,56 +222,43 @@ class HistoryManager {
     }
 
     getPrevious() {
-        if (this.canGoBack()) {
-            this._currentIndex--;
-            this._saveHistory();
-            return this._history[this._currentIndex];
-        }
-        return null;
+        if (!this.canGoBack())
+            return null;
+        this._currentIndex--;
+        this._save();
+        return this._history[this._currentIndex];
     }
 
     getNext() {
-        if (this.canGoForward()) {
-            this._currentIndex++;
-            this._saveHistory();
-            return this._history[this._currentIndex];
-        }
-        return null;
+        if (!this.canGoForward())
+            return null;
+        this._currentIndex++;
+        this._save();
+        return this._history[this._currentIndex];
     }
 
     getCurrent() {
-        if (this._currentIndex >= 0 && this._currentIndex < this._history.length) {
+        if (this._currentIndex >= 0 && this._currentIndex < this._history.length)
             return this._history[this._currentIndex];
-        }
         return null;
     }
 }
 
-/**
- * Panel Menu Indicator Component
- */
-const WchangerIndicator = GObject.registerClass(
 class WchangerIndicator extends PanelMenu.Button {
-    _init(extension) {
-        super._init(0.0, 'Anahita Wallpaper Changer');
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor(extension) {
+        super(0.0, 'Anahita Wallpaper Changer');
         this._extension = extension;
-        try {
-            this._settings = extension.getSettings('org.gnome.shell.extensions.wchanger');
-        } catch (e) {
-            logError(e, '[wchanger-extension] Failed to load extension schema');
-            this._settings = null;
-        }
-
-        try {
-            this._bgSettings = new Gio.Settings({ schema_id: GNOME_BG_SCHEMA });
-        } catch (e) {
-            logError(e, '[wchanger-extension] Failed to load GNOME background settings');
-            this._bgSettings = null;
-        }
-
+        this._settings = extension.getSettings();
+        this._bgSettings = new Gio.Settings({ schema_id: GNOME_BG_SCHEMA });
         this._historyManager = new HistoryManager();
 
-        // Icon in top bar
+        this._rotatorTimerId = null;
+        this._activeProc = null;
+
         this._icon = new St.Icon({
             icon_name: 'preferences-desktop-wallpaper-symbolic',
             style_class: 'system-status-icon wchanger-indicator-icon',
@@ -344,690 +267,396 @@ class WchangerIndicator extends PanelMenu.Button {
 
         this._buildMenu();
         this._syncCurrentBackground();
-
-        // Automatic Background Rotator timer state
-        this._rotatorTimerId = null;
         this._initRotator();
 
-        // Listen for settings changes
-        if (this._settings) {
-            this._intervalChangedId = this._settings.connect('changed::rotation-interval', () => {
-                if (this._getBooleanSetting('rotator-enabled', false)) {
+        this._settings.connectObject(
+            'changed::rotation-interval', () => {
+                if (this._settings.get_boolean('rotator-enabled'))
                     this._startRotatorTimer();
-                }
-            });
-
-            this._rotatorEnabledChangedId = this._settings.connect('changed::rotator-enabled', () => {
-                const enabled = this._getBooleanSetting('rotator-enabled', false);
-                if (this._serviceSwitch && this._serviceSwitch.state !== enabled) {
-                    this._syncingRotatorSwitch = true;
+            },
+            'changed::rotator-enabled', () => {
+                const enabled = this._settings.get_boolean('rotator-enabled');
+                if (this._serviceSwitch.state !== enabled)
                     this._serviceSwitch.setToggleState(enabled);
-                    this._syncingRotatorSwitch = false;
-                }
+
                 if (enabled) {
                     this._startRotatorTimer();
+                    this._controlSystemdService('start');
                 } else {
                     this._stopRotatorTimer();
                     this._cancelActiveRotation();
+                    this._controlSystemdService('stop');
                 }
-            });
-
-            this._wallpaperSourceChangedId = this._settings.connect('changed::wallpaper-source', () => {
-                const isLocal = this._getStringSetting('wallpaper-source', 'local') === 'local';
-                if (this._useLocalSourceSwitch && this._useLocalSourceSwitch.state !== isLocal) {
+            },
+            'changed::wallpaper-source', () => {
+                const isLocal = this._settings.get_string('wallpaper-source') === 'local';
+                if (this._useLocalSourceSwitch.state !== isLocal)
                     this._useLocalSourceSwitch.setToggleState(isLocal);
-                }
-                this._updateWallhavenCategoryVisibility();
-                this._updateUnsplashCategoryVisibility();
-                if (typeof this._updateProviderMenuOrnaments === 'function') {
-                    this._updateProviderMenuOrnaments();
-                }
-            });
+                this._updateCategoryVisibility();
+                this._updateProviderOrnaments();
+            },
+            'changed::default-provider', () => {
+                this._updateCategoryVisibility();
+                this._updateProviderOrnaments();
+            },
+            'changed::wallhaven-category', () => this._updateWallhavenOrnaments(),
+            'changed::unsplash-category', () => this._updateUnsplashOrnaments(),
+            this
+        );
 
-            this._defaultProviderChangedId = this._settings.connect('changed::default-provider', () => {
-                this._updateWallhavenCategoryVisibility();
-                this._updateUnsplashCategoryVisibility();
-                if (typeof this._updateProviderMenuOrnaments === 'function') {
-                    this._updateProviderMenuOrnaments();
-                }
-            });
-        }
-
-        // Listen for external wallpaper changes to keep history in sync (both light and dark modes)
-        if (this._bgSettings) {
-            this._bgChangedId = this._bgSettings.connect('changed::picture-uri', () => {
-                this._syncCurrentBackground();
-            });
-            this._bgDarkChangedId = this._bgSettings.connect('changed::picture-uri-dark', () => {
-                this._syncCurrentBackground();
-            });
-        }
-    }
-
-    _gettext(str) {
-        if (this._extension && typeof this._extension.gettext === 'function') {
-            try {
-                return this._extension.gettext(str);
-            } catch (e) {}
-        }
-        if (typeof _ === 'function') {
-            try {
-                return _(str);
-            } catch (e) {}
-        }
-        return str;
-    }
-
-    _getStringSetting(key, fallback = '') {
-        try {
-            if (this._settings?.settings_schema?.has_key(key)) {
-                return this._settings.get_string(key);
-            }
-        } catch (e) {}
-        return fallback;
-    }
-
-    _setStringSetting(key, val) {
-        try {
-            if (this._settings?.settings_schema?.has_key(key)) {
-                this._settings.set_string(key, val);
-            }
-        } catch (e) {}
-    }
-
-    _getBooleanSetting(key, fallback = false) {
-        try {
-            if (this._settings?.settings_schema?.has_key(key)) {
-                return this._settings.get_boolean(key);
-            }
-        } catch (e) {}
-        return fallback;
-    }
-
-    _setBooleanSetting(key, val) {
-        try {
-            if (this._settings?.settings_schema?.has_key(key)) {
-                this._settings.set_boolean(key, Boolean(val));
-            }
-        } catch (e) {}
-    }
-
-    _getIntSetting(key, fallback = 300) {
-        try {
-            if (this._settings?.settings_schema?.has_key(key)) {
-                return this._settings.get_int(key);
-            }
-        } catch (e) {}
-        return fallback;
-    }
-
-    _ensureRotatorEnabled() {
-        if (!this._getBooleanSetting('rotator-enabled', false)) {
-            this._setBooleanSetting('rotator-enabled', true);
-            if (this._serviceSwitch && !this._serviceSwitch.state) {
-                this._syncingRotatorSwitch = true;
-                this._serviceSwitch.setToggleState(true);
-                this._syncingRotatorSwitch = false;
-            }
-            this._startRotatorTimer();
-            this._controlSystemdService('start');
-        }
-    }
-
-    _updateWallhavenCategoryVisibility() {
-        if (!this._wallhavenSubMenu) return;
-        const source = this._getStringSetting('wallpaper-source', 'local');
-        const provider = this._getStringSetting('default-provider', 'wallhaven');
-        const isWallhavenActive = (source === 'online' && provider === 'wallhaven');
-
-        // Toggle actor visibility (handles both GTK/Clutter and GNOME Shell St.Widget wrappers)
-        if (typeof this._wallhavenSubMenu.visible !== 'undefined') {
-            this._wallhavenSubMenu.visible = isWallhavenActive;
-        }
-        if (this._wallhavenSubMenu.actor && typeof this._wallhavenSubMenu.actor.visible !== 'undefined') {
-            this._wallhavenSubMenu.actor.visible = isWallhavenActive;
-        }
-    }
-
-    _updateUnsplashCategoryVisibility() {
-        if (!this._unsplashSubMenu && !this._unsplashGuideItem) return;
-        const source = this._getStringSetting('wallpaper-source', 'local');
-        const provider = this._getStringSetting('default-provider', 'wallhaven');
-        const isUnsplashActive = (source === 'online' && provider === 'unsplash');
-
-        if (this._unsplashSubMenu) {
-            if (typeof this._unsplashSubMenu.visible !== 'undefined') {
-                this._unsplashSubMenu.visible = isUnsplashActive;
-            }
-            if (this._unsplashSubMenu.actor && typeof this._unsplashSubMenu.actor.visible !== 'undefined') {
-                this._unsplashSubMenu.actor.visible = isUnsplashActive;
-            }
-        }
-
-        if (this._unsplashGuideItem) {
-            if (typeof this._unsplashGuideItem.visible !== 'undefined') {
-                this._unsplashGuideItem.visible = isUnsplashActive;
-            }
-            if (this._unsplashGuideItem.actor && typeof this._unsplashGuideItem.actor.visible !== 'undefined') {
-                this._unsplashGuideItem.actor.visible = isUnsplashActive;
-            }
-        }
-    }
-
-    destroy() {
-        this._cancelActiveRotation();
-        if (this._rotatorTimerId) {
-            GLib.Source.remove(this._rotatorTimerId);
-            this._rotatorTimerId = null;
-        }
-        if (this._intervalChangedId && this._settings) {
-            this._settings.disconnect(this._intervalChangedId);
-            this._intervalChangedId = null;
-        }
-        if (this._rotatorEnabledChangedId && this._settings) {
-            this._settings.disconnect(this._rotatorEnabledChangedId);
-            this._rotatorEnabledChangedId = null;
-        }
-        if (this._wallpaperSourceChangedId && this._settings) {
-            this._settings.disconnect(this._wallpaperSourceChangedId);
-            this._wallpaperSourceChangedId = null;
-        }
-        if (this._defaultProviderChangedId && this._settings) {
-            this._settings.disconnect(this._defaultProviderChangedId);
-            this._defaultProviderChangedId = null;
-        }
-        if (this._bgChangedId && this._bgSettings) {
-            this._bgSettings.disconnect(this._bgChangedId);
-            this._bgChangedId = null;
-        }
-        if (this._bgDarkChangedId && this._bgSettings) {
-            this._bgSettings.disconnect(this._bgDarkChangedId);
-            this._bgDarkChangedId = null;
-        }
-        this._bgSettings = null;
-        this._settings = null;
-        this._wallhavenSubMenu = null;
-        this._wallhavenMenuItems = null;
-        this._providerMenuItems = null;
-        this._unsplashSubMenu = null;
-        this._unsplashMenuItems = null;
-        this._unsplashGuideItem = null;
-        super.destroy();
-    }
-
-    _syncCurrentBackground() {
-        try {
-            let uri = this._bgSettings ? this._bgSettings.get_string('picture-uri') : '';
-            if (!uri && this._bgSettings) {
-                uri = this._bgSettings.get_string('picture-uri-dark');
-            }
-            if (uri) {
-                let path = uri.startsWith('file://') ? uri.replace('file://', '') : uri;
-                try {
-                    path = decodeURIComponent(path);
-                } catch (e) {
-                    // Fallback to raw string if malformed URI encoding
-                }
-                this._historyManager.recordWallpaper(path);
-            }
-            this._updateNavButtons();
-        } catch (e) {
-            logError(e, '[wchanger-extension] Error syncing background');
-        }
-    }
-
-    _applyWallpaper(filePath) {
-        if (!filePath) return;
-        try {
-            const file = Gio.File.new_for_path(filePath);
-            if (!file.query_exists(null)) {
-                Main.notify('Anahita Wallpaper Changer', _('Wallpaper file not found: ') + filePath);
-                return;
-            }
-            const fileUri = file.get_uri();
-            if (this._bgSettings) {
-                this._bgSettings.set_string('picture-uri', fileUri);
-                this._bgSettings.set_string('picture-uri-dark', fileUri);
-            }
-            this._updateNavButtons();
-        } catch (e) {
-            logError(e, `[wchanger-extension] Failed to apply wallpaper: ${filePath}`);
-        }
+        this._bgSettings.connectObject(
+            'changed::picture-uri', () => this._syncCurrentBackground(),
+            'changed::picture-uri-dark', () => this._syncCurrentBackground(),
+            this
+        );
     }
 
     _buildMenu() {
-        // Section 1: Navigation Controls (Previous, Next, Favorite)
-        this._prevItem = new PopupMenu.PopupImageMenuItem(this._gettext('Previous'), 'media-skip-backward-symbolic');
-        this._prevItem.connect('activate', () => {
-            const prevWallpaper = this._historyManager.getPrevious();
-            if (prevWallpaper) {
-                this._applyWallpaper(prevWallpaper);
-            }
-        });
+        this._prevItem = new PopupMenu.PopupImageMenuItem(_('Previous'), 'media-skip-backward-symbolic');
+        this._prevItem.connectObject('activate', () => {
+            const prev = this._historyManager.getPrevious();
+            if (prev)
+                this._applyWallpaper(prev);
+        }, this);
         this.menu.addMenuItem(this._prevItem);
 
-        this._nextItem = new PopupMenu.PopupImageMenuItem(this._gettext('Next Wallpaper'), 'media-skip-forward-symbolic');
-        this._nextItem.connect('activate', () => {
+        this._nextItem = new PopupMenu.PopupImageMenuItem(_('Next Wallpaper'), 'media-skip-forward-symbolic');
+        this._nextItem.connectObject('activate', () => {
             this._ensureRotatorEnabled();
             if (this._historyManager.canGoForward()) {
-                const nextWallpaper = this._historyManager.getNext();
-                this._applyWallpaper(nextWallpaper);
+                const next = this._historyManager.getNext();
+                if (next)
+                    this._applyWallpaper(next);
             } else {
                 this._triggerWchangerRotation();
             }
-        });
+        }, this);
         this.menu.addMenuItem(this._nextItem);
 
-        this._favItem = new PopupMenu.PopupImageMenuItem(this._gettext('Add to Favorites'), 'starred-symbolic');
-        this._favItem.connect('activate', () => {
-            this._favoriteCurrentWallpaper();
-        });
+        this._favItem = new PopupMenu.PopupImageMenuItem(_('Add to Favorites'), 'starred-symbolic');
+        this._favItem.connectObject('activate', () => this._favoriteCurrentWallpaper(), this);
         this.menu.addMenuItem(this._favItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Section 2: Local Photos
-        const localSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Local Photos'), true);
-        if (localSubMenu.icon) {
+        const localSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Local Photos'), true);
+        if (localSubMenu.icon)
             localSubMenu.icon.icon_name = 'folder-pictures-symbolic';
-        }
 
-        const isLocalActive = this._getStringSetting('wallpaper-source', 'local') === 'local';
-        this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Use as Active Source'), isLocalActive);
-        this._useLocalSourceSwitch.connect('toggled', (item, state) => {
-            this._setStringSetting('wallpaper-source', state ? 'local' : 'online');
-            if (state) {
+        this._useLocalSourceSwitch = new PopupMenu.PopupSwitchMenuItem(_('Use as Active Source'), this._settings.get_string('wallpaper-source') === 'local');
+        this._useLocalSourceSwitch.connectObject('toggled', (item, state) => {
+            this._settings.set_string('wallpaper-source', state ? 'local' : 'online');
+            if (state)
                 this._ensureRotatorEnabled();
-            }
-        });
+        }, this);
         localSubMenu.menu.addMenuItem(this._useLocalSourceSwitch);
 
-        const openLocalDirItem = new PopupMenu.PopupImageMenuItem(this._gettext('Open Photos Folder'), 'folder-open-symbolic');
-        openLocalDirItem.connect('activate', () => {
-            const localDir = this._getLocalPhotosDirectory();
-            runCommandAsync(['xdg-open', localDir]);
-        });
+        const openLocalDirItem = new PopupMenu.PopupImageMenuItem(_('Open Photos Folder'), 'folder-open-symbolic');
+        openLocalDirItem.connectObject('activate', () => openFolder(this._getLocalPhotosDirectory()), this);
         localSubMenu.menu.addMenuItem(openLocalDirItem);
 
         this._localPhotoCountLabel = new PopupMenu.PopupMenuItem('', { reactive: false });
         localSubMenu.menu.addMenuItem(this._localPhotoCountLabel);
 
-        // Update photo count and switch state when submenu opens
-        localSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
-            if (isOpen) {
-                const localDir = this._getLocalPhotosDirectory();
-                const recursive = this._getBooleanSetting('recursive-scan', true);
-                const photos = getLocalPhotos(localDir, recursive);
-                const countText = photos.length > 0
-                    ? `${photos.length} ${this._gettext('photos found')}`
-                    : this._gettext('No photos found');
-                const homeDir = GLib.get_home_dir();
-                const displayDir = localDir.startsWith(homeDir)
-                    ? `~${localDir.substring(homeDir.length)}`
-                    : localDir;
-                this._localPhotoCountLabel.label.set_text(`${displayDir} (${countText})`);
+        localSubMenu.menu.connectObject('open-state-changed', (menu, isOpen) => {
+            if (!isOpen)
+                return;
+            const localDir = this._getLocalPhotosDirectory();
+            const photos = getLocalPhotos(localDir, this._settings.get_boolean('recursive-scan'));
+            const countText = photos.length > 0 ? `${photos.length} ${_('photos found')}` : _('No photos found');
+            const home = GLib.get_home_dir();
+            const displayDir = localDir.startsWith(home) ? `~${localDir.slice(home.length)}` : localDir;
+            this._localPhotoCountLabel.label.set_text(`${displayDir} (${countText})`);
 
-                const isLocal = this._getStringSetting('wallpaper-source', 'local') === 'local';
-                if (this._useLocalSourceSwitch.state !== isLocal) {
-                    this._useLocalSourceSwitch.setToggleState(isLocal);
-                }
-            }
-        });
-
+            const isLocal = this._settings.get_string('wallpaper-source') === 'local';
+            if (this._useLocalSourceSwitch.state !== isLocal)
+                this._useLocalSourceSwitch.setToggleState(isLocal);
+        }, this);
         this.menu.addMenuItem(localSubMenu);
 
-        // Section 3: Online Sources Submenu
-        const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Online Providers'), true);
-        if (sourcesSubMenu.icon) {
+        const sourcesSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Online Providers'), true);
+        if (sourcesSubMenu.icon)
             sourcesSubMenu.icon.icon_name = 'applications-internet-symbolic';
-        }
 
         const providers = [
-            { label: this._gettext('Wallhaven'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
-            { label: this._gettext('Unsplash'), key: 'unsplash', icon: 'camera-photo-symbolic' },
-            { label: this._gettext('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
-            { label: this._gettext('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
-            { label: this._gettext('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
+            { label: _('Wallhaven'), key: 'wallhaven', icon: 'image-x-generic-symbolic' },
+            { label: _('Unsplash'), key: 'unsplash', icon: 'camera-photo-symbolic' },
+            { label: _('Bing Daily Photo'), key: 'bing', icon: 'camera-photo-symbolic' },
+            { label: _('Lorem Picsum (Random)'), key: 'picsum', icon: 'insert-image-symbolic' },
+            { label: _('LoremFlickr (Nature)'), key: 'loremflickr', icon: 'emblem-photos-symbolic' },
         ];
 
         this._providerMenuItems = [];
-        providers.forEach(p => {
+        for (const p of providers) {
             const item = new PopupMenu.PopupImageMenuItem(p.label, p.icon);
             item._providerKey = p.key;
-            item.connect('activate', () => {
-                this._setStringSetting('wallpaper-source', 'online');
-                this._setStringSetting('default-provider', p.key);
-                updateProviderMenuOrnaments();
-                if (p.key === 'unsplash') {
-                    const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
-                    if (!unsplashKey) {
-                        try {
-                            if (typeof Main !== 'undefined' && Main?.notify) {
-                                Main.notify(
-                                    'Anahita Wallpaper Changer',
-                                    this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
-                                );
-                            }
-                            Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
-                        } catch (err) {
-                            logError(err, '[wchanger-ext] Failed to show Unsplash notice');
-                        }
-                        return;
-                    }
+            item.connectObject('activate', () => {
+                this._settings.set_string('wallpaper-source', 'online');
+                this._settings.set_string('default-provider', p.key);
+                this._updateProviderOrnaments();
+
+                if (p.key === 'unsplash' && !this._settings.get_string('unsplash-access-key').trim()) {
+                    Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
+                    Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
+                    return;
                 }
+
                 this._ensureRotatorEnabled();
-                const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', p.key, '--no-repetition'];
                 if (p.key === 'wallhaven') {
-                    const category = (this._getStringSetting('wallhaven-category', 'nature') || '').trim();
-                    if (category.length > 0) {
-                        args.push('-C', category);
-                    }
+                    const cat = this._settings.get_string('wallhaven-category').trim();
+                    if (cat)
+                        args.push('-C', cat);
                 } else if (p.key === 'unsplash') {
-                    const unsplashCat = (this._getStringSetting('unsplash-category', 'nature') || '').trim();
-                    if (unsplashCat.length > 0 && unsplashCat !== 'all') {
-                        args.push('-C', unsplashCat);
-                    }
-                    const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
-                    if (unsplashKey) {
-                        args.push('--unsplash-key', unsplashKey);
-                    }
+                    const cat = this._settings.get_string('unsplash-category').trim();
+                    if (cat && cat !== 'all')
+                        args.push('-C', cat);
+                    const key = this._settings.get_string('unsplash-access-key').trim();
+                    if (key)
+                        args.push('--unsplash-key', key);
                 }
-                if (multiMon) args.push('-m');
+                if (this._settings.get_boolean('enable-multi-monitor'))
+                    args.push('-m');
                 this._runWchangerCommand(args);
-            });
+            }, this);
             this._providerMenuItems.push(item);
             sourcesSubMenu.menu.addMenuItem(item);
-        });
-
-        const updateProviderMenuOrnaments = () => {
-            const isOnline = this._getStringSetting('wallpaper-source', 'local') === 'online';
-            const currentProvider = (this._getStringSetting('default-provider', 'wallhaven') || 'wallhaven').toLowerCase().trim();
-            for (const item of this._providerMenuItems) {
-                const isSelected = isOnline && (item._providerKey === currentProvider);
-                if (typeof item.setOrnament === 'function') {
-                    const checkOrnament = PopupMenu.Ornament?.CHECK ?? 2;
-                    const noneOrnament = PopupMenu.Ornament?.NONE ?? 0;
-                    item.setOrnament(isSelected ? checkOrnament : noneOrnament);
-                }
-            }
-        };
-
-        this._updateProviderMenuOrnaments = updateProviderMenuOrnaments;
-        updateProviderMenuOrnaments();
-
-        sourcesSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
-            if (isOpen) {
-                updateProviderMenuOrnaments();
-            }
-        });
-
-        this.menu.addMenuItem(sourcesSubMenu);
-
-        // Section 3b: Wallhaven Categories Submenu (conditionally visible when Wallhaven is active)
-        this._wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Wallhaven Categories'), true);
-        if (this._wallhavenSubMenu.icon) {
-            this._wallhavenSubMenu.icon.icon_name = 'view-grid-symbolic';
         }
 
+        sourcesSubMenu.menu.connectObject('open-state-changed', (menu, isOpen) => {
+            if (isOpen)
+                this._updateProviderOrnaments();
+        }, this);
+        this.menu.addMenuItem(sourcesSubMenu);
+
+        this._wallhavenSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Wallhaven Categories'), true);
+        if (this._wallhavenSubMenu.icon)
+            this._wallhavenSubMenu.icon.icon_name = 'view-grid-symbolic';
+
         const wallhavenCategories = [
-            { key: 'nature', label: this._gettext('Nature & Landscapes') },
-            { key: 'space', label: this._gettext('Space & Astronomy') },
-            { key: 'anime', label: this._gettext('Anime Artwork') },
-            { key: 'cyberpunk', label: this._gettext('Cyberpunk & Sci-Fi') },
-            { key: 'city', label: this._gettext('City & Architecture') },
-            { key: 'cars', label: this._gettext('Cars & Vehicles') },
-            { key: 'gaming', label: this._gettext('Gaming & Fantasy') },
-            { key: 'minimalism', label: this._gettext('Minimalism') },
-            { key: 'general', label: this._gettext('General Photography') },
-            { key: 'all', label: this._gettext('All (Random)') },
+            { key: 'nature', label: _('Nature & Landscapes') },
+            { key: 'space', label: _('Space & Astronomy') },
+            { key: 'anime', label: _('Anime Artwork') },
+            { key: 'cyberpunk', label: _('Cyberpunk & Sci-Fi') },
+            { key: 'city', label: _('City & Architecture') },
+            { key: 'cars', label: _('Cars & Vehicles') },
+            { key: 'gaming', label: _('Gaming & Fantasy') },
+            { key: 'minimalism', label: _('Minimalism') },
+            { key: 'general', label: _('General Photography') },
+            { key: 'all', label: _('All (Random)') },
         ];
 
         this._wallhavenMenuItems = [];
-        wallhavenCategories.forEach(cat => {
+        for (const cat of wallhavenCategories) {
             const item = new PopupMenu.PopupMenuItem(cat.label);
             item._categoryKey = cat.key;
-            item.connect('activate', () => {
-                this._setStringSetting('wallpaper-source', 'online');
-                this._setStringSetting('default-provider', 'wallhaven');
-                this._setStringSetting('wallhaven-category', cat.key);
+            item.connectObject('activate', () => {
+                this._settings.set_string('wallpaper-source', 'online');
+                this._settings.set_string('default-provider', 'wallhaven');
+                this._settings.set_string('wallhaven-category', cat.key);
                 this._ensureRotatorEnabled();
-                const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
+
                 const args = ['--online', 'wallhaven', '-C', cat.key, '--no-repetition'];
-                if (multiMon) args.push('-m');
+                if (this._settings.get_boolean('enable-multi-monitor'))
+                    args.push('-m');
                 this._runWchangerCommand(args);
-            });
+            }, this);
             this._wallhavenMenuItems.push(item);
             this._wallhavenSubMenu.menu.addMenuItem(item);
-        });
-
-        const updateWallhavenMenuOrnaments = () => {
-            const currentCat = (this._getStringSetting('wallhaven-category', 'nature') || 'nature').toLowerCase().trim();
-            for (const item of this._wallhavenMenuItems) {
-                const isSelected = (item._categoryKey === currentCat);
-                if (typeof item.setOrnament === 'function') {
-                    const checkOrnament = PopupMenu.Ornament?.CHECK ?? 2;
-                    const noneOrnament = PopupMenu.Ornament?.NONE ?? 0;
-                    item.setOrnament(isSelected ? checkOrnament : noneOrnament);
-                }
-            }
-        };
-
-        // Initialize checkmarks immediately
-        updateWallhavenMenuOrnaments();
-
-        this._wallhavenSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
-            if (isOpen) {
-                updateWallhavenMenuOrnaments();
-            }
-        });
-
-        this.menu.addMenuItem(this._wallhavenSubMenu);
-        this._updateWallhavenCategoryVisibility();
-
-        // Section 3b-2: Unsplash Categories Submenu (conditionally visible when Unsplash is active)
-        this._unsplashSubMenu = new PopupMenu.PopupSubMenuMenuItem(this._gettext('Unsplash Categories'), true);
-        if (this._unsplashSubMenu.icon) {
-            this._unsplashSubMenu.icon.icon_name = 'view-grid-symbolic';
         }
 
+        this._wallhavenSubMenu.menu.connectObject('open-state-changed', (menu, isOpen) => {
+            if (isOpen)
+                this._updateWallhavenOrnaments();
+        }, this);
+        this.menu.addMenuItem(this._wallhavenSubMenu);
+
+        this._unsplashSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Unsplash Categories'), true);
+        if (this._unsplashSubMenu.icon)
+            this._unsplashSubMenu.icon.icon_name = 'view-grid-symbolic';
+
         const unsplashCategories = [
-            { key: 'nature', label: this._gettext('Nature & Landscapes') },
-            { key: 'wallpapers', label: this._gettext('Desktop Wallpapers') },
-            { key: 'travel', label: this._gettext('Travel & Exploration') },
-            { key: 'architecture', label: this._gettext('Architecture & Interiors') },
-            { key: 'space', label: this._gettext('Space & Astronomy') },
-            { key: 'minimalism', label: this._gettext('Minimalism') },
-            { key: 'animals', label: this._gettext('Animals & Wildlife') },
-            { key: 'textures', label: this._gettext('Textures & Patterns') },
-            { key: 'city', label: this._gettext('Street & City') },
-            { key: 'technology', label: this._gettext('Technology & Cyber') },
-            { key: 'all', label: this._gettext('All (Random)') },
+            { key: 'nature', label: _('Nature & Landscapes') },
+            { key: 'wallpapers', label: _('Desktop Wallpapers') },
+            { key: 'travel', label: _('Travel & Exploration') },
+            { key: 'architecture', label: _('Architecture & Interiors') },
+            { key: 'space', label: _('Space & Astronomy') },
+            { key: 'minimalism', label: _('Minimalism') },
+            { key: 'animals', label: _('Animals & Wildlife') },
+            { key: 'textures', label: _('Textures & Patterns') },
+            { key: 'city', label: _('Street & City') },
+            { key: 'technology', label: _('Technology & Cyber') },
+            { key: 'all', label: _('All (Random)') },
         ];
 
         this._unsplashMenuItems = [];
-        unsplashCategories.forEach(cat => {
+        for (const cat of unsplashCategories) {
             const item = new PopupMenu.PopupMenuItem(cat.label);
             item._categoryKey = cat.key;
-            item.connect('activate', () => {
-                const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
-                this._setStringSetting('wallpaper-source', 'online');
-                this._setStringSetting('default-provider', 'unsplash');
-                this._setStringSetting('unsplash-category', cat.key);
-                if (!unsplashKey) {
-                    try {
-                        if (typeof Main !== 'undefined' && Main?.notify) {
-                            Main.notify(
-                                'Anahita Wallpaper Changer',
-                                this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
-                            );
-                        }
-                        Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
-                    } catch (err) {
-                        logError(err, '[wchanger-ext] Failed to show Unsplash notice');
-                    }
+            item.connectObject('activate', () => {
+                const key = this._settings.get_string('unsplash-access-key').trim();
+                this._settings.set_string('wallpaper-source', 'online');
+                this._settings.set_string('default-provider', 'unsplash');
+                this._settings.set_string('unsplash-category', cat.key);
+
+                if (!key) {
+                    Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
+                    Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
                     return;
                 }
+
                 this._ensureRotatorEnabled();
-                const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
                 const args = ['--online', 'unsplash', '--no-repetition'];
-                if (cat.key !== 'all') {
+                if (cat.key !== 'all')
                     args.push('-C', cat.key);
-                }
-                args.push('--unsplash-key', unsplashKey);
-                if (multiMon) args.push('-m');
+                args.push('--unsplash-key', key);
+                if (this._settings.get_boolean('enable-multi-monitor'))
+                    args.push('-m');
                 this._runWchangerCommand(args);
-            });
+            }, this);
             this._unsplashMenuItems.push(item);
             this._unsplashSubMenu.menu.addMenuItem(item);
-        });
+        }
 
-        const updateUnsplashMenuOrnaments = () => {
-            const currentCat = (this._getStringSetting('unsplash-category', 'nature') || 'nature').toLowerCase().trim();
-            for (const item of this._unsplashMenuItems) {
-                const isSelected = (item._categoryKey === currentCat);
-                if (typeof item.setOrnament === 'function') {
-                    const checkOrnament = PopupMenu.Ornament?.CHECK ?? 2;
-                    const noneOrnament = PopupMenu.Ornament?.NONE ?? 0;
-                    item.setOrnament(isSelected ? checkOrnament : noneOrnament);
-                }
-            }
-        };
-
-        updateUnsplashMenuOrnaments();
-
-        this._unsplashSubMenu.menu.connect('open-state-changed', (menu, isOpen) => {
-            if (isOpen) {
-                updateUnsplashMenuOrnaments();
-            }
-        });
-
+        this._unsplashSubMenu.menu.connectObject('open-state-changed', (menu, isOpen) => {
+            if (isOpen)
+                this._updateUnsplashOrnaments();
+        }, this);
         this.menu.addMenuItem(this._unsplashSubMenu);
 
-        // Section 3b-3: Unsplash Setup Guide (conditionally visible when Unsplash is active)
         this._unsplashGuideItem = new PopupMenu.PopupImageMenuItem(
-            this._gettext('Unsplash Setup Guide (README.md)'),
+            _('Unsplash Setup Guide (README.md)'),
             'help-browser-symbolic'
         );
-        this._unsplashGuideItem.connect('activate', () => {
-            try {
-                Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
-            } catch (err) {
-                logError(err, '[wchanger-ext] Failed to open README guide');
-            }
-        });
+        this._unsplashGuideItem.connectObject('activate', () => {
+            Gio.AppInfo.launch_default_for_uri('https://github.com/ibehii/Wallpaper-changer#unsplash-setup-guide', null);
+        }, this);
         this.menu.addMenuItem(this._unsplashGuideItem);
 
-        this._updateUnsplashCategoryVisibility();
-
-        // Section 3c: Multi-Monitor Quick Action
-        const multiMonItem = new PopupMenu.PopupImageMenuItem(this._gettext('Rotate Multi-Monitor'), 'video-display-symbolic');
-        multiMonItem.connect('activate', () => {
+        const multiMonItem = new PopupMenu.PopupImageMenuItem(_('Rotate Multi-Monitor'), 'video-display-symbolic');
+        multiMonItem.connectObject('activate', () => {
             this._ensureRotatorEnabled();
-            const source = this._getStringSetting('wallpaper-source', 'local');
-            if (source === 'local') {
+            if (this._settings.get_string('wallpaper-source') === 'local') {
                 const localDir = this._getLocalPhotosDirectory();
-                const recursive = this._getBooleanSetting('recursive-scan', true);
-                const args = ['-m', '--no-repetition'];
-                if (recursive) args.push('-R');
-                args.push(localDir);
-                this._runWchangerCommand(args);
+                const photos = getLocalPhotos(localDir, this._settings.get_boolean('recursive-scan'));
+                if (photos.length === 0) {
+                    Main.notify('Anahita Wallpaper Changer', `${_('No photos found in local folder:')} ${localDir}`);
+                    return;
+                }
+                const chosen = photos[Math.floor(Math.random() * photos.length)];
+                this._applyWallpaper(chosen);
             } else {
-                const defaultProvider = this._getStringSetting('default-provider', 'wallhaven') || 'wallhaven';
-                const args = ['--online', defaultProvider, '-m', '--no-repetition'];
-                if (defaultProvider === 'wallhaven') {
-                    const category = (this._getStringSetting('wallhaven-category', 'nature') || '').trim();
-                    if (category.length > 0) {
-                        args.push('-C', category);
-                    }
-                } else if (defaultProvider === 'unsplash') {
-                    const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
-                    if (!unsplashKey) {
-                        Main.notify(
-                            'Anahita Wallpaper Changer',
-                            this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
-                        );
+                const provider = this._settings.get_string('default-provider');
+                const args = ['--online', provider, '-m', '--no-repetition'];
+                if (provider === 'wallhaven') {
+                    const cat = this._settings.get_string('wallhaven-category').trim();
+                    if (cat)
+                        args.push('-C', cat);
+                } else if (provider === 'unsplash') {
+                    const key = this._settings.get_string('unsplash-access-key').trim();
+                    if (!key) {
+                        Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
                         return;
                     }
-                    const unsplashCat = (this._getStringSetting('unsplash-category', 'nature') || '').trim();
-                    if (unsplashCat.length > 0 && unsplashCat !== 'all') {
-                        args.push('-C', unsplashCat);
-                    }
-                    args.push('--unsplash-key', unsplashKey);
+                    const cat = this._settings.get_string('unsplash-category').trim();
+                    if (cat && cat !== 'all')
+                        args.push('-C', cat);
+                    args.push('--unsplash-key', key);
                 }
                 this._runWchangerCommand(args);
             }
-        });
+        }, this);
         this.menu.addMenuItem(multiMonItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Section 4: Automatic Background Rotator Switch
-        this._syncingRotatorSwitch = false;
-        this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem(this._gettext('Background Rotator'), false);
+        this._serviceSwitch = new PopupMenu.PopupSwitchMenuItem(_('Background Rotator'), false);
         const rotatorIcon = new St.Icon({
             icon_name: 'view-refresh-symbolic',
             style_class: 'popup-menu-icon',
         });
         this._serviceSwitch.insert_child_at_index(rotatorIcon, 0);
-
-        this._serviceSwitch.connect('toggled', (item, state) => {
-            if (this._syncingRotatorSwitch) return;
-            this._setBooleanSetting('rotator-enabled', state);
-            if (state) {
-                this._startRotatorTimer();
-                this._controlSystemdService('start');
-            } else {
-                this._stopRotatorTimer();
-                this._cancelActiveRotation();
-                this._controlSystemdService('stop');
-            }
-        });
+        this._serviceSwitch.connectObject('toggled', (item, state) => {
+            if (this._settings.get_boolean('rotator-enabled') !== state)
+                this._settings.set_boolean('rotator-enabled', state);
+        }, this);
         this.menu.addMenuItem(this._serviceSwitch);
 
-        // Section 5: Folder & Settings shortcuts
-        const openFavsItem = new PopupMenu.PopupImageMenuItem(this._gettext('Open Favorites Folder'), 'folder-open-symbolic');
-        openFavsItem.connect('activate', () => {
-            const favDir = this._getFavoritesDirectory();
-            runCommandAsync(['xdg-open', favDir]);
-        });
+        const openFavsItem = new PopupMenu.PopupImageMenuItem(_('Open Favorites Folder'), 'folder-open-symbolic');
+        openFavsItem.connectObject('activate', () => openFolder(this._getFavoritesDirectory()), this);
         this.menu.addMenuItem(openFavsItem);
 
-        const prefsItem = new PopupMenu.PopupImageMenuItem(this._gettext('Extension Settings…'), 'preferences-system-symbolic');
-        prefsItem.connect('activate', () => {
+        const prefsItem = new PopupMenu.PopupImageMenuItem(_('Extension Settings…'), 'preferences-system-symbolic');
+        prefsItem.connectObject('activate', () => {
             this._extension.openPreferences();
-        });
+        }, this);
         this.menu.addMenuItem(prefsItem);
 
-        this.menu.connect('open-state-changed', (menu, isOpen) => {
-            if (isOpen) {
+        this.menu.connectObject('open-state-changed', (menu, isOpen) => {
+            if (isOpen)
                 this._updateNavButtons();
-            }
-        });
+        }, this);
+
+        this._updateCategoryVisibility();
+        this._updateProviderOrnaments();
+        this._updateWallhavenOrnaments();
+        this._updateUnsplashOrnaments();
     }
 
-    _updateNavButtons() {
-        if (this._prevItem) {
-            this._prevItem.setSensitive(this._historyManager.canGoBack());
+    _updateProviderOrnaments() {
+        const isOnline = this._settings.get_string('wallpaper-source') === 'online';
+        const current = this._settings.get_string('default-provider');
+        for (const item of this._providerMenuItems) {
+            item.setOrnament(isOnline && item._providerKey === current
+                ? PopupMenu.Ornament.CHECK
+                : PopupMenu.Ornament.NONE);
         }
+    }
+
+    _updateWallhavenOrnaments() {
+        const current = this._settings.get_string('wallhaven-category');
+        for (const item of this._wallhavenMenuItems) {
+            item.setOrnament(item._categoryKey === current
+                ? PopupMenu.Ornament.CHECK
+                : PopupMenu.Ornament.NONE);
+        }
+    }
+
+    _updateUnsplashOrnaments() {
+        const current = this._settings.get_string('unsplash-category');
+        for (const item of this._unsplashMenuItems) {
+            item.setOrnament(item._categoryKey === current
+                ? PopupMenu.Ornament.CHECK
+                : PopupMenu.Ornament.NONE);
+        }
+    }
+
+    _updateCategoryVisibility() {
+        const isOnline = this._settings.get_string('wallpaper-source') === 'online';
+        const provider = this._settings.get_string('default-provider');
+
+        this._wallhavenSubMenu.visible = isOnline && provider === 'wallhaven';
+        this._unsplashSubMenu.visible = isOnline && provider === 'unsplash';
+        this._unsplashGuideItem.visible = isOnline && provider === 'unsplash';
+    }
+
+    _ensureRotatorEnabled() {
+        if (!this._settings.get_boolean('rotator-enabled'))
+            this._settings.set_boolean('rotator-enabled', true);
     }
 
     _initRotator() {
-        const enabled = this._getBooleanSetting('rotator-enabled', false);
-        this._syncingRotatorSwitch = true;
+        const enabled = this._settings.get_boolean('rotator-enabled');
         this._serviceSwitch.setToggleState(enabled);
-        this._syncingRotatorSwitch = false;
-        if (enabled) {
+        if (enabled)
             this._startRotatorTimer();
-        }
     }
 
     _startRotatorTimer() {
         this._stopRotatorTimer();
-        let intervalSec = this._getIntSetting('rotation-interval', 300);
-        if (intervalSec < 30) {
+        let intervalSec = this._settings.get_int('rotation-interval');
+        if (intervalSec < 30)
             intervalSec = 300;
-        }
 
         this._rotatorTimerId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
@@ -1047,186 +676,150 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _triggerWchangerRotation() {
-        const source = this._getStringSetting('wallpaper-source', 'local');
-        if (source === 'local') {
+        if (this._settings.get_string('wallpaper-source') === 'local') {
             this._applyRandomLocalPhoto();
             return;
         }
 
-        const multiMon = this._getBooleanSetting('enable-multi-monitor', false);
-        const defaultProvider = this._getStringSetting('default-provider', 'wallhaven') || 'wallhaven';
-        const args = ['--online', defaultProvider, '--no-repetition'];
-        if (multiMon) {
+        const provider = this._settings.get_string('default-provider');
+        const args = ['--online', provider, '--no-repetition'];
+        if (this._settings.get_boolean('enable-multi-monitor'))
             args.push('-m');
-        }
-        if (defaultProvider === 'wallhaven') {
-            const category = (this._getStringSetting('wallhaven-category', 'nature') || '').trim();
-            if (category.length > 0) {
-                args.push('-C', category);
-            }
-        } else if (defaultProvider === 'unsplash') {
-            const unsplashKey = (this._getStringSetting('unsplash-access-key', '') || '').trim();
-            if (!unsplashKey) {
-                Main.notify(
-                    'Anahita Wallpaper Changer',
-                    this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
-                );
+
+        if (provider === 'wallhaven') {
+            const cat = this._settings.get_string('wallhaven-category').trim();
+            if (cat)
+                args.push('-C', cat);
+        } else if (provider === 'unsplash') {
+            const key = this._settings.get_string('unsplash-access-key').trim();
+            if (!key) {
+                Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
                 return;
             }
-            const unsplashCat = (this._getStringSetting('unsplash-category', 'nature') || '').trim();
-            if (unsplashCat.length > 0 && unsplashCat !== 'all') {
-                args.push('-C', unsplashCat);
-            }
-            args.push('--unsplash-key', unsplashKey);
+            const cat = this._settings.get_string('unsplash-category').trim();
+            if (cat && cat !== 'all')
+                args.push('-C', cat);
+            args.push('--unsplash-key', key);
         }
+
         this._runWchangerCommand(args);
     }
 
     _cancelActiveRotation() {
-        this._rotationCancelled = true;
-        if (this._activeRotationProc) {
-            try {
-                this._activeRotationProc.force_exit();
-            } catch (e) {}
-            this._activeRotationProc = null;
+        if (this._activeProc) {
+            this._activeProc.force_exit();
+            this._activeProc = null;
         }
     }
 
     _runWchangerCommand(args) {
-        const customPath = this._getStringSetting('custom-wchanger-path', '');
+        const customPath = this._settings.get_string('custom-wchanger-path');
         const baseCmd = getWchangerCommand(customPath);
         if (!baseCmd) {
-            Main.notify(
-                'Anahita Wallpaper Changer',
-                this._gettext('“wchanger” command not found. Please install via “pip install .” or configure path in settings.')
-            );
+            Main.notify('Anahita Wallpaper Changer', _('“wchanger” command not found. Please install via “pip install .” or configure path in settings.'));
             return;
         }
 
-        // Cancel previous rotation subprocess if still running
-        if (this._activeRotationProc) {
-            try {
-                this._activeRotationProc.force_exit();
-            } catch (e) {}
-            this._activeRotationProc = null;
-        }
+        this._cancelActiveRotation();
 
-        this._rotationCancelled = false;
         const fullArgv = [...baseCmd, ...args];
-        this._activeRotationProc = runCommandAsync(fullArgv, (success, stdout, stderr) => {
-            this._activeRotationProc = null;
-            if (this._rotationCancelled) {
-                this._rotationCancelled = false;
+        const proc = runCommandAsync(fullArgv, (success, stdout, stderr) => {
+            if (this._activeProc !== proc)
                 return;
-            }
+            this._activeProc = null;
+
             if (success) {
                 this._syncCurrentBackground();
-            } else {
-                const isUnsplash = args.includes('unsplash');
-                const errText = `${stderr || ''} ${stdout || ''}`.toLowerCase();
+                return;
+            }
 
-                if (isUnsplash && (errText.includes('requires an access key') || errText.includes('access key is required') || !this._getStringSetting('unsplash-access-key', '').trim())) {
-                    Main.notify(
-                        'Anahita Wallpaper Changer',
-                        this._gettext('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.')
-                    );
-                } else if (isUnsplash && (errText.includes('401') || errText.includes('unauthorized') || errText.includes('invalid or expired'))) {
-                    Main.notify(
-                        'Anahita Wallpaper Changer',
-                        this._gettext('Unsplash API authentication failed (HTTP 401). Your Access Key is invalid or expired.')
-                    );
-                } else if (isUnsplash && (errText.includes('403') || errText.includes('rate limit'))) {
-                    Main.notify(
-                        'Anahita Wallpaper Changer',
-                        this._gettext('Unsplash hourly rate limit exceeded (HTTP 403). Free tier is limited to 50 requests/hour.')
-                    );
-                } else {
-                    Main.notify(
-                        'Anahita Wallpaper Changer',
-                        this._gettext('Failed to rotate wallpaper. Please verify image path or online connection.')
-                    );
-                }
+            const isUnsplash = args.includes('unsplash');
+            const err = `${stderr} ${stdout}`.toLowerCase();
+
+            if (isUnsplash && (err.includes('access key') || !this._settings.get_string('unsplash-access-key').trim())) {
+                Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
+            } else if (isUnsplash && (err.includes('401') || err.includes('unauthorized'))) {
+                Main.notify('Anahita Wallpaper Changer', _('Unsplash API authentication failed (HTTP 401). Your Access Key is invalid or expired.'));
+            } else if (isUnsplash && (err.includes('403') || err.includes('rate limit'))) {
+                Main.notify('Anahita Wallpaper Changer', _('Unsplash hourly rate limit exceeded (HTTP 403). Free tier is limited to 50 requests/hour.'));
+            } else {
+                Main.notify('Anahita Wallpaper Changer', _('Failed to rotate wallpaper. Please verify image path or online connection.'));
             }
         });
+        this._activeProc = proc;
+    }
+
+    _updateNavButtons() {
+        this._prevItem?.setSensitive(this._historyManager.canGoBack());
+    }
+
+    _syncCurrentBackground() {
+        const uri = this._bgSettings.get_string('picture-uri') ||
+            this._bgSettings.get_string('picture-uri-dark');
+
+        if (uri) {
+            const [path] = GLib.filename_from_uri(uri);
+            if (path)
+                this._historyManager.recordWallpaper(path);
+        }
+        this._updateNavButtons();
+    }
+
+    _applyWallpaper(filePath) {
+        if (!filePath)
+            return;
+
+        const file = Gio.File.new_for_path(filePath);
+        if (!file.query_exists(null)) {
+            Main.notify('Anahita Wallpaper Changer', `${_('Wallpaper file not found:')} ${filePath}`);
+            return;
+        }
+
+        const uri = file.get_uri();
+        this._bgSettings.set_string('picture-uri', uri);
+        this._bgSettings.set_string('picture-uri-dark', uri);
+        this._updateNavButtons();
     }
 
     _getFavoritesDirectory() {
-        let customPath = this._getStringSetting('favorites-directory', '');
-        if (!customPath || customPath.trim().length === 0) {
-            const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
-            customPath = `${pics}/Wallpapers/Favorites`;
-        }
-        if (customPath.startsWith('~')) {
-            customPath = `${GLib.get_home_dir()}${customPath.substring(1)}`;
-        }
-        const dir = Gio.File.new_for_path(customPath);
-        if (!dir.query_exists(null)) {
-            try {
-                dir.make_directory_with_parents(null);
-            } catch (e) {
-                // Ignore
-            }
-        }
-        return customPath;
+        return resolveDirectory(this._settings.get_string('favorites-directory'), 'Wallpapers/Favorites');
     }
 
     _getLocalPhotosDirectory() {
-        let customPath = this._getStringSetting('wallpapers-directory', '');
-        if (!customPath || customPath.trim().length === 0) {
-            const pics = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) || `${GLib.get_home_dir()}/Pictures`;
-            customPath = `${pics}/Wallpapers`;
-        }
-        // Expand ~ if present
-        if (customPath.startsWith('~')) {
-            customPath = `${GLib.get_home_dir()}${customPath.substring(1)}`;
-        }
-        const dir = Gio.File.new_for_path(customPath);
-        if (!dir.query_exists(null)) {
-            try {
-                dir.make_directory_with_parents(null);
-            } catch (e) {
-                // Ignore
-            }
-        }
-        return customPath;
+        return resolveDirectory(this._settings.get_string('wallpapers-directory'), 'Wallpapers');
     }
 
     _applyRandomLocalPhoto() {
         const localDir = this._getLocalPhotosDirectory();
-        const recursive = this._getBooleanSetting('recursive-scan', true);
-        const photos = getLocalPhotos(localDir, recursive, true);
+        const recursive = this._settings.get_boolean('recursive-scan');
+        const photos = getLocalPhotos(localDir, recursive);
 
         if (photos.length === 0) {
-            Main.notify(
-                'Anahita Wallpaper Changer',
-                `${this._gettext('No photos found in local folder:')} ${localDir}`
-            );
+            Main.notify('Anahita Wallpaper Changer', `${_('No photos found in local folder:')} ${localDir}`);
             return;
         }
 
-        // Pick a random photo, avoiding the current wallpaper if possible
-        const currentPath = this._historyManager.getCurrent();
-        let candidates = photos;
-        if (photos.length > 1 && currentPath) {
-            candidates = photos.filter(p => p !== currentPath);
-            if (candidates.length === 0) candidates = photos;
-        }
+        const current = this._historyManager.getCurrent();
+        let candidates = photos.length > 1 && current
+            ? photos.filter(p => p !== current)
+            : photos;
+        if (candidates.length === 0)
+            candidates = photos;
 
-        const randomIndex = Math.floor(Math.random() * candidates.length);
-        const chosen = candidates[randomIndex];
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
         this._applyWallpaper(chosen);
     }
 
     _favoriteCurrentWallpaper() {
         const currentPath = this._historyManager.getCurrent();
         if (!currentPath) {
-            Main.notify('Anahita Wallpaper Changer', this._gettext('No active wallpaper found to favorite.'));
+            Main.notify('Anahita Wallpaper Changer', _('No active wallpaper found to favorite.'));
             return;
         }
 
         const sourceFile = Gio.File.new_for_path(currentPath);
         if (!sourceFile.query_exists(null)) {
-            Main.notify('Anahita Wallpaper Changer', this._gettext('Active wallpaper file not accessible.'));
+            Main.notify('Anahita Wallpaper Changer', _('Active wallpaper file not accessible.'));
             return;
         }
 
@@ -1243,94 +836,59 @@ class WchangerIndicator extends PanelMenu.Button {
             (file, res) => {
                 try {
                     file.copy_finish(res);
-                    Main.notify(
-                        'Anahita Wallpaper Changer',
-                        `${this._gettext('Saved to Favorites:')} ${baseName}`
-                    );
-                } catch (e) {
-                    logError(e, '[wchanger-extension] Failed to copy wallpaper to favorites');
-                    Main.notify('Anahita Wallpaper Changer', this._gettext('Failed to save to favorites.'));
+                    Main.notify('Anahita Wallpaper Changer', `${_('Saved to Favorites:')} ${baseName}`);
+                } catch {
+                    Main.notify('Anahita Wallpaper Changer', _('Failed to save to favorites.'));
                 }
             }
         );
     }
 
-    _checkSystemdServiceState() {
-        if (!GLib.find_program_in_path('systemctl')) {
-            return;
-        }
-
-        try {
-            Gio.DBus.session.call(
-                'org.freedesktop.systemd1',
-                '/org/freedesktop/systemd1',
-                'org.freedesktop.systemd1.Manager',
-                'ListUnitsByNames',
-                new GLib.Variant('(as)', [['wallpaper-changer.service']]),
-                new GLib.VariantType('(a(ssssssouso))'),
-                Gio.DBusCallFlags.NONE,
-                -1,
-                null,
-                (connection, res) => {
-                    try {
-                        const reply = connection.call_finish(res);
-                        const [units] = reply.deepUnpack();
-                        if (units && units.length > 0) {
-                            const activeState = units[0][3];
-                            if (activeState === 'active') {
-                                this._serviceSwitch.setToggleState(true);
-                                this._setBooleanSetting('rotator-enabled', true);
-                            }
-                        }
-                    } catch (e) {
-                        // Ignore D-Bus lookup errors
-                    }
-                }
-            );
-        } catch (e) {
-            // Ignore
-        }
-    }
-
     _controlSystemdService(action) {
-        if (!GLib.find_program_in_path('systemctl')) {
+        if (!GLib.find_program_in_path('systemctl'))
             return;
-        }
-        // Non-blocking attempt to control systemd service if present
         runCommandAsync(['systemctl', '--user', action, 'wallpaper-changer.service']);
     }
-});
+
+    destroy() {
+        this._stopRotatorTimer();
+        this._cancelActiveRotation();
+        this.disconnectObject();
+
+        if (this._settings) {
+            this._settings.disconnectObject(this);
+            this._settings = null;
+        }
+        if (this._bgSettings) {
+            this._bgSettings.disconnectObject(this);
+            this._bgSettings = null;
+        }
+
+        super.destroy();
+    }
+
+    _onDestroy() {
+        this.destroy();
+        super._onDestroy();
+    }
+}
 
 export default class WchangerExtension extends Extension {
     enable() {
-        try {
-            this.initTranslations();
-        } catch (e) {}
-        try {
-            this._settings = this.getSettings('org.gnome.shell.extensions.wchanger');
-        } catch (e) {
-            logError(e, '[wchanger-extension] Failed to load extension settings');
-            this._settings = null;
-        }
+        this.initTranslations();
+        this._settings = this.getSettings();
         this._indicator = null;
 
-        // Respect show-indicator setting
-        if (this._settings) {
-            this._showIndicatorChangedId = this._settings.connect('changed::show-indicator', () => {
-                this._updateIndicatorVisibility();
-            });
-        }
+        this._settings.connectObject(
+            'changed::show-indicator', () => this._syncIndicator(),
+            this
+        );
 
-        this._updateIndicatorVisibility();
+        this._syncIndicator();
     }
 
-    _updateIndicatorVisibility() {
-        let show = true;
-        try {
-            if (this._settings?.settings_schema?.has_key('show-indicator')) {
-                show = this._settings.get_boolean('show-indicator');
-            }
-        } catch (e) {}
+    _syncIndicator() {
+        const show = this._settings.get_boolean('show-indicator');
         if (show && !this._indicator) {
             this._indicator = new WchangerIndicator(this);
             Main.panel.addToStatusArea(this.uuid, this._indicator);
@@ -1341,14 +899,12 @@ export default class WchangerExtension extends Extension {
     }
 
     disable() {
-        if (this._showIndicatorChangedId && this._settings) {
-            this._settings.disconnect(this._showIndicatorChangedId);
-            this._showIndicatorChangedId = null;
-        }
+        this._settings?.disconnectObject(this);
+        this._settings = null;
+
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
         }
-        this._settings = null;
     }
 }
