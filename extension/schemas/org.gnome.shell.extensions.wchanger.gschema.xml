@@ -24,7 +24,7 @@
     <key name="enable-multi-monitor" type="b">
       <default>false</default>
       <summary>Enable multi-monitor spanning by default</summary>
-      <description>Whether to invoke wchanger with -m for multi-monitor display spanning.</description>
+      <description>Whether to assign distinct wallpapers across connected displays.</description>
     </key>
     <key name="rotator-enabled" type="b">
       <default>false</default>

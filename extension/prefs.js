@@ -17,8 +17,9 @@ function openFolderChooser(window, title, currentPath, onSelected) {
             const folder = dialogObj.select_folder_finish(res);
             if (folder)
                 onSelected(folder.get_path());
-        } catch {
-            // Cancelled or non-fatal dialog error
+        } catch (e) {
+            if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                throw e;
         }
     });
 }
@@ -38,9 +39,53 @@ function bindCombo(row, settings, key, choices) {
     });
 }
 
+function addCategoryRows(settings, key, title, subtitle, customTitle, categories) {
+    const current = settings.get_string(key) || 'nature';
+    const comboRow = new Adw.ComboRow({
+        title,
+        subtitle,
+        model: Gtk.StringList.new(categories.map(c => c.name)),
+        selected: Math.max(0, categories.findIndex(c => c.id === current)),
+    });
+
+    const customRow = new Adw.EntryRow({
+        title: customTitle,
+        text: current,
+        show_apply_button: true,
+    });
+
+    comboRow.connect('notify::selected', () => {
+        const chosen = categories[comboRow.selected]?.id;
+        if (chosen && settings.get_string(key) !== chosen) {
+            settings.set_string(key, chosen);
+            customRow.set_text(chosen);
+        }
+    });
+
+    customRow.connect('apply', () => {
+        const val = customRow.get_text().trim().toLowerCase();
+        if (val && settings.get_string(key) !== val) {
+            settings.set_string(key, val);
+            const idx = categories.findIndex(c => c.id === val);
+            if (idx >= 0)
+                comboRow.set_selected(idx);
+        }
+    });
+
+    settings.connect(`changed::${key}`, () => {
+        const cat = settings.get_string(key) || 'nature';
+        if (customRow.get_text() !== cat)
+            customRow.set_text(cat);
+        const idx = categories.findIndex(c => c.id === cat);
+        if (idx >= 0 && comboRow.selected !== idx)
+            comboRow.selected = idx;
+    });
+
+    return [comboRow, customRow];
+}
+
 export default class WchangerPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        this.initTranslations();
         const settings = this.getSettings();
 
         const page = new Adw.PreferencesPage({
@@ -64,7 +109,7 @@ export default class WchangerPreferences extends ExtensionPreferences {
 
         const multiMonitorRow = new Adw.SwitchRow({
             title: _('Multi-Monitor Spanning'),
-            subtitle: _('Pass -m to wchanger to assign different wallpapers across monitors.'),
+            subtitle: _('Assign different wallpapers across connected monitors.'),
         });
         settings.bind('enable-multi-monitor', multiMonitorRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         appearanceGroup.add(multiMonitorRow);
@@ -178,46 +223,14 @@ export default class WchangerPreferences extends ExtensionPreferences {
             { id: 'general', name: _('General Photography') },
             { id: 'all', name: _('All (Random)') },
         ];
-        const currentWallhavenCat = settings.get_string('wallhaven-category') || 'nature';
-        const categoryRow = new Adw.ComboRow({
-            title: _('Wallhaven Category'),
-            subtitle: _('Select image category or theme when Wallhaven is used.'),
-            model: Gtk.StringList.new(wallhavenCategories.map(c => c.name)),
-            selected: Math.max(0, wallhavenCategories.findIndex(c => c.id === currentWallhavenCat)),
-        });
-
-        const customCatRow = new Adw.EntryRow({
-            title: _('Custom Wallhaven Tag / Keyword'),
-            text: currentWallhavenCat,
-            show_apply_button: true,
-        });
-
-        categoryRow.connect('notify::selected', () => {
-            const chosen = wallhavenCategories[categoryRow.selected]?.id;
-            if (chosen && settings.get_string('wallhaven-category') !== chosen) {
-                settings.set_string('wallhaven-category', chosen);
-                customCatRow.set_text(chosen);
-            }
-        });
-
-        customCatRow.connect('apply', () => {
-            const val = customCatRow.get_text().trim().toLowerCase();
-            if (val && settings.get_string('wallhaven-category') !== val) {
-                settings.set_string('wallhaven-category', val);
-                const idx = wallhavenCategories.findIndex(c => c.id === val);
-                if (idx >= 0)
-                    categoryRow.set_selected(idx);
-            }
-        });
-
-        settings.connect('changed::wallhaven-category', () => {
-            const cat = settings.get_string('wallhaven-category') || 'nature';
-            if (customCatRow.get_text() !== cat)
-                customCatRow.set_text(cat);
-            const idx = wallhavenCategories.findIndex(c => c.id === cat);
-            if (idx >= 0 && categoryRow.selected !== idx)
-                categoryRow.selected = idx;
-        });
+        const [categoryRow, customCatRow] = addCategoryRows(
+            settings,
+            'wallhaven-category',
+            _('Wallhaven Category'),
+            _('Select image category or theme when Wallhaven is used.'),
+            _('Custom Wallhaven Tag / Keyword'),
+            wallhavenCategories
+        );
 
         const unsplashKeyRow = new Adw.PasswordEntryRow({
             title: _('Unsplash Access Key'),
@@ -254,46 +267,14 @@ export default class WchangerPreferences extends ExtensionPreferences {
             { id: 'technology', name: _('Technology & Cyber') },
             { id: 'all', name: _('All (Random)') },
         ];
-        const currentUnsplashCat = settings.get_string('unsplash-category') || 'nature';
-        const unsplashCategoryRow = new Adw.ComboRow({
-            title: _('Unsplash Category'),
-            subtitle: _('Select curated photo category or theme when Unsplash is used.'),
-            model: Gtk.StringList.new(unsplashCategories.map(c => c.name)),
-            selected: Math.max(0, unsplashCategories.findIndex(c => c.id === currentUnsplashCat)),
-        });
-
-        const unsplashCustomCatRow = new Adw.EntryRow({
-            title: _('Custom Unsplash Search Query'),
-            text: currentUnsplashCat,
-            show_apply_button: true,
-        });
-
-        unsplashCategoryRow.connect('notify::selected', () => {
-            const chosen = unsplashCategories[unsplashCategoryRow.selected]?.id;
-            if (chosen && settings.get_string('unsplash-category') !== chosen) {
-                settings.set_string('unsplash-category', chosen);
-                unsplashCustomCatRow.set_text(chosen);
-            }
-        });
-
-        unsplashCustomCatRow.connect('apply', () => {
-            const val = unsplashCustomCatRow.get_text().trim().toLowerCase();
-            if (val && settings.get_string('unsplash-category') !== val) {
-                settings.set_string('unsplash-category', val);
-                const idx = unsplashCategories.findIndex(c => c.id === val);
-                if (idx >= 0)
-                    unsplashCategoryRow.set_selected(idx);
-            }
-        });
-
-        settings.connect('changed::unsplash-category', () => {
-            const cat = settings.get_string('unsplash-category') || 'nature';
-            if (unsplashCustomCatRow.get_text() !== cat)
-                unsplashCustomCatRow.set_text(cat);
-            const idx = unsplashCategories.findIndex(c => c.id === cat);
-            if (idx >= 0 && unsplashCategoryRow.selected !== idx)
-                unsplashCategoryRow.set_selected(idx);
-        });
+        const [unsplashCategoryRow, unsplashCustomCatRow] = addCategoryRows(
+            settings,
+            'unsplash-category',
+            _('Unsplash Category'),
+            _('Select curated photo category or theme when Unsplash is used.'),
+            _('Custom Unsplash Search Query'),
+            unsplashCategories
+        );
 
         const updateProviderSensitivity = provider => {
             const isWallhaven = provider === 'wallhaven';
@@ -358,21 +339,5 @@ export default class WchangerPreferences extends ExtensionPreferences {
             settings.set_int('rotation-interval', minutes * 60);
         });
         rotatorGroup.add(intervalRow);
-
-        const advancedGroup = new Adw.PreferencesGroup({
-            title: _('Advanced'),
-            description: _('Executable resolution and custom CLI overrides.'),
-        });
-        page.add(advancedGroup);
-
-        const customPathRow = new Adw.EntryRow({
-            title: _('Custom wchanger Executable Path'),
-            text: settings.get_string('custom-wchanger-path'),
-            show_apply_button: true,
-        });
-        customPathRow.connect('apply', () => {
-            settings.set_string('custom-wchanger-path', customPathRow.get_text().trim());
-        });
-        advancedGroup.add(customPathRow);
     }
 }

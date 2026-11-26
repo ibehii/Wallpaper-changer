@@ -2601,6 +2601,231 @@ setup_auto_start = setup_install_autostart_service
 setup_install_autostart = setup_install_autostart_service
 
 
+DBUS_BUS_NAME = "io.github.ibehii.Wchanger"
+DBUS_OBJECT_PATH = "/io/github/ibehii/Wchanger"
+DBUS_INTERFACE_NAME = "io.github.ibehii.Wchanger"
+
+DBUS_INTERFACE_XML = """
+<node>
+  <interface name="io.github.ibehii.Wchanger">
+    <method name="RotateOnline">
+      <arg type="s" name="provider" direction="in"/>
+      <arg type="s" name="category" direction="in"/>
+      <arg type="s" name="unsplash_key" direction="in"/>
+      <arg type="b" name="multi_monitor" direction="in"/>
+      <arg type="b" name="success" direction="out"/>
+      <arg type="s" name="message" direction="out"/>
+    </method>
+    <method name="Ping">
+      <arg type="s" name="version" direction="out"/>
+    </method>
+  </interface>
+</node>
+"""
+
+
+def _download_online_file(
+    provider_key: str,
+    category: str | None,
+    access_key: str | None,
+    target_cache_dir: Path,
+    suffix_tag: str = "",
+) -> Path:
+    image_url = get_online_wallpaper_url(provider_key, category=category, access_key=access_key)
+    parsed_path = Path(urlparse(image_url).path).suffix.lower()
+    ext = parsed_path if parsed_path in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+    timestamp_marker = time.strftime("%Y%m%d_%H%M%S")
+    random_identifier = random.randint(1000, 9999)
+    cache_file = target_cache_dir / f"wallpaper_{provider_key}_{timestamp_marker}_{random_identifier}{suffix_tag}{ext}"
+    download_online_wallpaper(image_url, cache_file)
+    return cache_file
+
+
+def apply_online_wallpaper_once(
+    provider: str,
+    category: str | None = None,
+    unsplash_key: str | None = None,
+    multi_monitor: bool = False,
+    desktop_environment: str | None = None,
+    color_theme: str | None = None,
+    cache_dir: Path | None = None,
+    keep_last: int = DEFAULT_KEEP_LAST,
+    prefetch: bool = True,
+) -> tuple[bool, str]:
+    """Fetch and apply online wallpaper(s) once; returns (success, message)."""
+    provider_key = (provider or "").strip().lower()
+    if provider_key not in ONLINE_PROVIDER_CHOICES:
+        return False, f"Unknown online provider '{provider}'."
+
+    normalized_category = (category or "").strip() or None
+    resolved_key = get_unsplash_access_key(explicit_key=(unsplash_key or "").strip() or None)
+    if provider_key == "unsplash" and not resolved_key:
+        return False, "Unsplash requires an API Access Key."
+
+    try:
+        desktop = desktop_environment or detect_desktop_environment()
+        target_cache_dir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
+        target_cache_dir.mkdir(parents=True, exist_ok=True)
+        monitor_count = get_effective_monitor_count(desktop, multi_monitor=multi_monitor) if multi_monitor else 1
+
+        wallpaper_paths: list[Path] = []
+        for idx in range(monitor_count):
+            prefetched = (
+                get_prefetch_candidate(target_cache_dir, provider_key, category=normalized_category, monitor_index=idx)
+                if prefetch
+                else None
+            )
+            tag = f"_m{idx}" if monitor_count > 1 else ""
+            if prefetched is not None:
+                cache_file = target_cache_dir / f"wallpaper_{provider_key}_{time.strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}{tag}{prefetched.suffix}"
+                prefetched.replace(cache_file)
+            else:
+                cache_file = _download_online_file(provider_key, normalized_category, resolved_key, target_cache_dir, tag)
+            wallpaper_paths.append(cache_file)
+
+        payload: Path | Sequence[Path] = wallpaper_paths[0] if monitor_count == 1 else wallpaper_paths
+        operation_success, status_message = set_wallpaper_for_desktop(
+            desktop_environment=desktop,
+            wallpaper_path=payload,
+            color_theme=color_theme,
+        )
+        if not operation_success:
+            return False, status_message or f"Failed to set online wallpaper to desktop ({desktop})."
+
+        cleanup_download_cache(target_cache_dir, keep_last=keep_last)
+
+        if prefetch:
+            threading.Thread(
+                target=prefetch_online_wallpaper,
+                kwargs={
+                    "provider": provider_key,
+                    "category": normalized_category,
+                    "cache_dir": target_cache_dir,
+                    "multi_monitor": multi_monitor,
+                    "desktop_environment": desktop,
+                    "access_key": resolved_key,
+                },
+                daemon=True,
+            ).start()
+
+        return True, status_message or "Wallpaper updated."
+    except (URLError, HTTPError, TimeoutError, ConnectionError, OSError, ValueError, RuntimeError) as error:
+        return False, format_network_error(provider_key, error)
+
+
+def install_dbus_service(
+    exec_command: str | None = None,
+    dbus_services_dir: Path | None = None,
+) -> Path:
+    """Install the session D-Bus activation .service file for wchanger."""
+    services_dir = dbus_services_dir or (Path.home() / ".local" / "share" / "dbus-1" / "services")
+    services_dir.mkdir(parents=True, exist_ok=True)
+    service_path = services_dir / f"{DBUS_BUS_NAME}.service"
+
+    if exec_command:
+        resolved_exec = exec_command.strip()
+    else:
+        wchanger_bin = shutil.which("wchanger")
+        resolved_exec = wchanger_bin if wchanger_bin else f"{sys.executable} {Path(__file__).resolve()}"
+
+    service_content = (
+        "[D-BUS Service]\n"
+        f"Name={DBUS_BUS_NAME}\n"
+        f"Exec={resolved_exec} --dbus\n"
+    )
+    service_path.write_text(service_content, encoding="utf-8")
+    return service_path
+
+
+def run_dbus_service(
+    desktop_override: str | None = None,
+    color_theme: str | None = None,
+    custom_cache_dir: Path | None = None,
+    keep_last: int = DEFAULT_KEEP_LAST,
+    prefetch: bool = True,
+) -> None:
+    """Expose wchanger online wallpaper controls on the session D-Bus."""
+    try:
+        from gi.repository import Gio, GLib
+    except ImportError:
+        click.secho(
+            "Error: PyGObject (gi.repository.Gio) is required for D-Bus mode.",
+            fg="red",
+            err=True,
+        )
+        sys.exit(1)
+
+    node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
+    interface_info = node_info.lookup_interface(DBUS_INTERFACE_NAME)
+    loop = GLib.MainLoop()
+
+    def handle_method_call(
+        connection: Any,
+        sender: str,
+        object_path: str,
+        interface_name: str,
+        method_name: str,
+        parameters: Any,
+        invocation: Any,
+    ) -> None:
+        if method_name == "Ping":
+            invocation.return_value(GLib.Variant("(s)", (VERSION,)))
+            return
+
+        if method_name == "RotateOnline":
+            provider, category, unsplash_key, multi_monitor = parameters.unpack()
+
+            def worker() -> None:
+                success, message = apply_online_wallpaper_once(
+                    provider=provider,
+                    category=category,
+                    unsplash_key=unsplash_key,
+                    multi_monitor=bool(multi_monitor),
+                    desktop_environment=desktop_override,
+                    color_theme=color_theme,
+                    cache_dir=custom_cache_dir,
+                    keep_last=keep_last,
+                    prefetch=prefetch,
+                )
+                GLib.idle_add(lambda: (invocation.return_value(GLib.Variant("(bs)", (success, message))), False)[1])
+
+            threading.Thread(target=worker, daemon=True).start()
+            return
+
+        invocation.return_dbus_error(
+            "org.freedesktop.DBus.Error.UnknownMethod",
+            f"Unknown method '{method_name}'",
+        )
+
+    def on_bus_acquired(connection: Any, name: str) -> None:
+        connection.register_object(
+            DBUS_OBJECT_PATH,
+            interface_info,
+            handle_method_call,
+            None,
+            None,
+        )
+
+    def on_name_lost(connection: Any, name: str) -> None:
+        loop.quit()
+
+    owner_id = Gio.bus_own_name(
+        Gio.BusType.SESSION,
+        DBUS_BUS_NAME,
+        Gio.BusNameOwnerFlags.NONE,
+        on_bus_acquired,
+        None,
+        on_name_lost,
+    )
+
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        Gio.bus_unown_name(owner_id)
+
+
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "--pause",
@@ -2764,6 +2989,19 @@ setup_install_autostart = setup_install_autostart_service
     hidden=True,
     help="Silently prefetch candidate online wallpaper and exit.",
 )
+@click.option(
+    "--dbus",
+    "dbus_mode",
+    is_flag=True,
+    default=False,
+    help="Run as a session D-Bus service for desktop extensions.",
+)
+@click.option(
+    "--install-dbus",
+    is_flag=True,
+    default=False,
+    help="Install the session D-Bus activation service file for GNOME integration.",
+)
 @click.argument(
     "photo_path",
     type=click.Path(file_okay=False, dir_okay=True, resolve_path=True, path_type=Path),
@@ -2790,6 +3028,8 @@ def cli(
     no_config: bool,
     prefetch: bool,
     prefetch_only: bool,
+    dbus_mode: bool,
+    install_dbus: bool,
     photo_path: Path | None,
     unsplash_key: str | None = None,
     multi_monitor: bool = False,
@@ -2877,6 +3117,21 @@ def cli(
         config_cat = str(config_settings["category"]).strip()
         if config_cat:
             category = config_cat
+
+    if install_dbus:
+        service_path = install_dbus_service()
+        click.secho(f"[+] Installed D-Bus activation service at {service_path}", fg="green", bold=True)
+        sys.exit(0)
+
+    if dbus_mode:
+        run_dbus_service(
+            desktop_override=desktop_override,
+            color_theme=theme,
+            custom_cache_dir=custom_cache_dir,
+            keep_last=keep_last,
+            prefetch=prefetch,
+        )
+        sys.exit(0)
 
     if prefetch_only:
         target_provider = online or str(config_settings.get("online", "wallhaven"))

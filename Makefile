@@ -1,4 +1,4 @@
-.PHONY: all install install-bin install-extension pack-extension uninstall-extension test clean uninstall
+.PHONY: all install install-bin install-dbus install-extension pack-extension uninstall-extension test clean uninstall
 
 all: install
 
@@ -18,6 +18,9 @@ install-bin:
 		echo "[!] Error: write permission to /bin required (run with sudo)"; \
 		exit 1; \
 	fi
+
+install-dbus:
+	python3 wchanger.py --install-dbus
 
 install-extension:
 	@UUID="wchanger@ibehii.github.com"; \

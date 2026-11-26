@@ -3895,6 +3895,82 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertEqual(mock_cycle.call_args.kwargs.get("category"), "architecture")
 
 
+    def test_install_dbus_service_writes_activation_file(self) -> None:
+        """install_dbus_service should write a valid D-Bus activation .service file."""
+        services_dir = self.test_dir / "dbus-services"
+        service_path = wchanger.install_dbus_service(
+            exec_command="/usr/local/bin/wchanger",
+            dbus_services_dir=services_dir,
+        )
+        self.assertTrue(service_path.exists())
+        content = service_path.read_text(encoding="utf-8")
+        self.assertIn(f"Name={wchanger.DBUS_BUS_NAME}", content)
+        self.assertIn("Exec=/usr/local/bin/wchanger --dbus", content)
+
+    def test_apply_online_wallpaper_once_unknown_provider(self) -> None:
+        """apply_online_wallpaper_once should fail cleanly on unknown providers."""
+        ok, msg = wchanger.apply_online_wallpaper_once("invalid_provider")
+        self.assertFalse(ok)
+        self.assertIn("Unknown online provider", msg)
+
+    @patch("wchanger.get_unsplash_access_key", return_value=None)
+    def test_apply_online_wallpaper_once_missing_unsplash_key(self, _mock_key: MagicMock) -> None:
+        """apply_online_wallpaper_once should fail when Unsplash key is missing."""
+        ok, msg = wchanger.apply_online_wallpaper_once("unsplash", unsplash_key="")
+        self.assertFalse(ok)
+        self.assertIn("Access Key", msg)
+
+    @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "Applied"))
+    @patch("wchanger.download_online_wallpaper")
+    @patch("wchanger.get_online_wallpaper_url", return_value="https://example.com/wall.jpg")
+    @patch("wchanger.detect_desktop_environment", return_value="gnome")
+    def test_apply_online_wallpaper_once_success(
+        self,
+        _mock_de: MagicMock,
+        _mock_url: MagicMock,
+        mock_download: MagicMock,
+        mock_set: MagicMock,
+    ) -> None:
+        """apply_online_wallpaper_once should download and apply wallpaper without prefetch."""
+        cache_dir = self.test_dir / "dbus-cache"
+        ok, msg = wchanger.apply_online_wallpaper_once(
+            provider="wallhaven",
+            category="nature",
+            multi_monitor=False,
+            cache_dir=cache_dir,
+            prefetch=False,
+        )
+        self.assertTrue(ok)
+        self.assertEqual(msg, "Applied")
+        mock_download.assert_called_once()
+        mock_set.assert_called_once()
+
+    @patch("wchanger.set_wallpaper_for_desktop", return_value=(True, "Applied multi"))
+    @patch("wchanger.download_online_wallpaper")
+    @patch("wchanger.get_online_wallpaper_url", return_value="https://example.com/wall.jpg")
+    @patch("wchanger.get_effective_monitor_count", return_value=2)
+    @patch("wchanger.detect_desktop_environment", return_value="gnome")
+    def test_apply_online_wallpaper_once_multi_monitor(
+        self,
+        _mock_de: MagicMock,
+        _mock_mon: MagicMock,
+        _mock_url: MagicMock,
+        mock_download: MagicMock,
+        mock_set: MagicMock,
+    ) -> None:
+        """apply_online_wallpaper_once should download one image per monitor when multi_monitor=True."""
+        cache_dir = self.test_dir / "dbus-cache-multi"
+        ok, _ = wchanger.apply_online_wallpaper_once(
+            provider="wallhaven",
+            multi_monitor=True,
+            cache_dir=cache_dir,
+            prefetch=False,
+        )
+        self.assertTrue(ok)
+        self.assertEqual(mock_download.call_count, 2)
+        self.assertEqual(len(mock_set.call_args.kwargs["wallpaper_path"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
 

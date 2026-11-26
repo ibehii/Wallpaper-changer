@@ -10,106 +10,44 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 const GNOME_BG_SCHEMA = 'org.gnome.desktop.background';
 const MAX_HISTORY_ITEMS = 50;
 const SUPPORTED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.svg', '.tiff']);
+const DBUS_BUS_NAME = 'io.github.ibehii.Wchanger';
+const DBUS_OBJECT_PATH = '/io/github/ibehii/Wchanger';
+const DBUS_INTERFACE_NAME = 'io.github.ibehii.Wchanger';
 
 function getLocalPhotos(dirPath, recursive = false) {
-    const path = dirPath?.replace(/^~/, GLib.get_home_dir())?.trim();
-    if (!path)
+    const path = dirPath?.replace(/^~/, GLib.get_home_dir()).trim();
+    if (!path || !GLib.file_test(path, GLib.FileTest.IS_DIR))
         return [];
 
     const dir = Gio.File.new_for_path(path);
-    if (!dir.query_exists(null))
-        return [];
+    const photos = [];
+    const enumerator = dir.enumerate_children(
+        'standard::name,standard::type',
+        Gio.FileQueryInfoFlags.NONE,
+        null
+    );
 
     try {
-        const photos = [];
-        const enumerator = dir.enumerate_children(
-            'standard::name,standard::type',
-            Gio.FileQueryInfoFlags.NONE,
-            null
-        );
-
         let info;
         while ((info = enumerator.next_file(null))) {
             const name = info.get_name();
             if (name.startsWith('.'))
                 continue;
-            const child = dir.get_child(name);
-            if (info.get_file_type() === Gio.FileType.REGULAR) {
+            const childPath = dir.get_child(name).get_path();
+            const type = info.get_file_type();
+            if (type === Gio.FileType.REGULAR) {
                 const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
                 if (SUPPORTED_IMAGE_EXTENSIONS.has(ext))
-                    photos.push(child.get_path());
-            } else if (recursive && info.get_file_type() === Gio.FileType.DIRECTORY) {
-                photos.push(...getLocalPhotos(child.get_path(), true));
+                    photos.push(childPath);
+            } else if (recursive && type === Gio.FileType.DIRECTORY) {
+                photos.push(...getLocalPhotos(childPath, true));
             }
         }
+    } finally {
         enumerator.close(null);
-        return photos;
-    } catch {
-        return [];
-    }
-}
-
-function runCommandAsync(argv, onFinished = null) {
-    try {
-        const proc = new Gio.Subprocess({
-            argv,
-            flags: onFinished
-                ? Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
-                : Gio.SubprocessFlags.NONE,
-        });
-        proc.init(null);
-        if (onFinished) {
-            proc.communicate_utf8_async(null, null, (p, res) => {
-                try {
-                    const [, stdout, stderr] = p.communicate_utf8_finish(res);
-                    onFinished(p.get_successful(), stdout || '', stderr || '');
-                } catch (err) {
-                    onFinished(false, '', err.message || '');
-                }
-            });
-        }
-        return proc;
-    } catch (e) {
-        onFinished?.(false, '', e.message || '');
-        return null;
-    }
-}
-
-function getWchangerCommand(customPath = '') {
-    const trimmed = customPath?.trim();
-    if (trimmed) {
-        try {
-            const [, argv] = GLib.shell_parse_argv(trimmed);
-            if (argv?.length)
-                return argv;
-        } catch (e) {
-            return [trimmed];
-        }
     }
 
-    if (GLib.find_program_in_path('wchanger'))
-        return ['wchanger'];
-
-    const home = GLib.get_home_dir();
-    const candidates = [
-        `${home}/.local/bin/wchanger`,
-        '/usr/local/bin/wchanger',
-        '/usr/bin/wchanger',
-        '/bin/wchanger',
-    ];
-
-    for (const p of candidates) {
-        if (GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE))
-            return [p];
-    }
-
-    const repoScript = `${home}/Dev/Wallpaper-changer/wchanger.py`;
-    if (GLib.file_test(repoScript, GLib.FileTest.EXISTS)) {
-        const python = GLib.find_program_in_path('python3') || 'python3';
-        return [python, repoScript];
-    }
-
-    return null;
+    return photos;
 }
 
 function resolveDirectory(customPath, defaultSubdir) {
@@ -121,20 +59,12 @@ function resolveDirectory(customPath, defaultSubdir) {
     if (dir.startsWith('~'))
         dir = `${GLib.get_home_dir()}${dir.slice(1)}`;
 
-    const file = Gio.File.new_for_path(dir);
-    if (!file.query_exists(null)) {
-        try {
-            file.make_directory_with_parents(null);
-        } catch {
-            // Non-fatal if directory creation fails
-        }
-    }
+    GLib.mkdir_with_parents(dir, 0o755);
     return dir;
 }
 
 function openFolder(path) {
-    const file = Gio.File.new_for_path(path);
-    Gio.AppInfo.launch_default_for_uri(file.get_uri(), null);
+    Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(path).get_uri(), null);
 }
 
 class HistoryManager {
@@ -151,64 +81,45 @@ class HistoryManager {
             return;
 
         file.load_contents_async(null, (fileObj, res) => {
-            try {
-                const [ok, contents] = fileObj.load_contents_finish(res);
-                if (ok) {
-                    const data = JSON.parse(new TextDecoder().decode(contents));
-                    if (Array.isArray(data.items)) {
-                        this._history = data.items;
-                        this._currentIndex = typeof data.currentIndex === 'number'
-                            ? data.currentIndex
-                            : this._history.length - 1;
-                    }
-                }
-            } catch {
-                // Ignore unreadable or corrupt cache file
+            const [ok, contents] = fileObj.load_contents_finish(res);
+            if (!ok)
+                return;
+            const data = JSON.parse(new TextDecoder().decode(contents));
+            if (Array.isArray(data.items)) {
+                this._history = data.items;
+                this._currentIndex = typeof data.currentIndex === 'number'
+                    ? data.currentIndex
+                    : this._history.length - 1;
             }
         });
     }
 
     _save() {
-        try {
-            const dir = Gio.File.new_for_path(GLib.path_get_dirname(this._historyFile));
-            if (!dir.query_exists(null))
-                dir.make_directory_with_parents(null);
-
-            const file = Gio.File.new_for_path(this._historyFile);
-            const data = JSON.stringify({
-                items: this._history.slice(-MAX_HISTORY_ITEMS),
-                currentIndex: this._currentIndex,
-            }, null, 2);
-            file.replace_contents_bytes_async(
-                new GLib.Bytes(new TextEncoder().encode(data)),
-                null,
-                false,
-                Gio.FileCreateFlags.REPLACE_DESTINATION,
-                null,
-                null
-            );
-        } catch {
-            // Non-critical cache write failure
-        }
+        GLib.mkdir_with_parents(GLib.path_get_dirname(this._historyFile), 0o755);
+        const file = Gio.File.new_for_path(this._historyFile);
+        const data = JSON.stringify({
+            items: this._history.slice(-MAX_HISTORY_ITEMS),
+            currentIndex: this._currentIndex,
+        }, null, 2);
+        file.replace_contents_bytes_async(
+            new GLib.Bytes(new TextEncoder().encode(data)),
+            null,
+            false,
+            Gio.FileCreateFlags.REPLACE_DESTINATION,
+            null,
+            null
+        );
     }
 
     recordWallpaper(filePath) {
-        if (!filePath)
+        if (!filePath || this.getCurrent() === filePath)
             return;
 
-        if (this._currentIndex >= 0 && this._currentIndex < this._history.length && this._history[this._currentIndex] === filePath)
-            return;
-
-        if (this._history.length > 0 && this._history[this._history.length - 1] === filePath) {
-            this._currentIndex = this._history.length - 1;
-            this._save();
-            return;
+        if (this._history.at(-1) !== filePath) {
+            this._history.push(filePath);
+            if (this._history.length > MAX_HISTORY_ITEMS)
+                this._history.shift();
         }
-
-        this._history.push(filePath);
-        if (this._history.length > MAX_HISTORY_ITEMS)
-            this._history.shift();
-
         this._currentIndex = this._history.length - 1;
         this._save();
     }
@@ -238,9 +149,7 @@ class HistoryManager {
     }
 
     getCurrent() {
-        if (this._currentIndex >= 0 && this._currentIndex < this._history.length)
-            return this._history[this._currentIndex];
-        return null;
+        return this._history[this._currentIndex] ?? null;
     }
 }
 
@@ -257,7 +166,7 @@ class WchangerIndicator extends PanelMenu.Button {
         this._historyManager = new HistoryManager();
 
         this._rotatorTimerId = null;
-        this._activeProc = null;
+        this._rotationCancellable = null;
 
         this._icon = new St.Icon({
             icon_name: 'preferences-desktop-wallpaper-symbolic',
@@ -402,22 +311,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 }
 
                 this._ensureRotatorEnabled();
-                const args = ['--online', p.key, '--no-repetition'];
-                if (p.key === 'wallhaven') {
-                    const cat = this._settings.get_string('wallhaven-category').trim();
-                    if (cat)
-                        args.push('-C', cat);
-                } else if (p.key === 'unsplash') {
-                    const cat = this._settings.get_string('unsplash-category').trim();
-                    if (cat && cat !== 'all')
-                        args.push('-C', cat);
-                    const key = this._settings.get_string('unsplash-access-key').trim();
-                    if (key)
-                        args.push('--unsplash-key', key);
-                }
-                if (this._settings.get_boolean('enable-multi-monitor'))
-                    args.push('-m');
-                this._runWchangerCommand(args);
+                this._rotateOnline(p.key);
             }, this);
             this._providerMenuItems.push(item);
             sourcesSubMenu.menu.addMenuItem(item);
@@ -455,11 +349,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 this._settings.set_string('default-provider', 'wallhaven');
                 this._settings.set_string('wallhaven-category', cat.key);
                 this._ensureRotatorEnabled();
-
-                const args = ['--online', 'wallhaven', '-C', cat.key, '--no-repetition'];
-                if (this._settings.get_boolean('enable-multi-monitor'))
-                    args.push('-m');
-                this._runWchangerCommand(args);
+                this._rotateOnline('wallhaven');
             }, this);
             this._wallhavenMenuItems.push(item);
             this._wallhavenSubMenu.menu.addMenuItem(item);
@@ -506,13 +396,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 }
 
                 this._ensureRotatorEnabled();
-                const args = ['--online', 'unsplash', '--no-repetition'];
-                if (cat.key !== 'all')
-                    args.push('-C', cat.key);
-                args.push('--unsplash-key', key);
-                if (this._settings.get_boolean('enable-multi-monitor'))
-                    args.push('-m');
-                this._runWchangerCommand(args);
+                this._rotateOnline('unsplash');
             }, this);
             this._unsplashMenuItems.push(item);
             this._unsplashSubMenu.menu.addMenuItem(item);
@@ -546,24 +430,7 @@ class WchangerIndicator extends PanelMenu.Button {
                 const chosen = photos[Math.floor(Math.random() * photos.length)];
                 this._applyWallpaper(chosen);
             } else {
-                const provider = this._settings.get_string('default-provider');
-                const args = ['--online', provider, '-m', '--no-repetition'];
-                if (provider === 'wallhaven') {
-                    const cat = this._settings.get_string('wallhaven-category').trim();
-                    if (cat)
-                        args.push('-C', cat);
-                } else if (provider === 'unsplash') {
-                    const key = this._settings.get_string('unsplash-access-key').trim();
-                    if (!key) {
-                        Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
-                        return;
-                    }
-                    const cat = this._settings.get_string('unsplash-category').trim();
-                    if (cat && cat !== 'all')
-                        args.push('-C', cat);
-                    args.push('--unsplash-key', key);
-                }
-                this._runWchangerCommand(args);
+                this._rotateOnline(this._settings.get_string('default-provider'), true);
             }
         }, this);
         this.menu.addMenuItem(multiMonItem);
@@ -603,32 +470,35 @@ class WchangerIndicator extends PanelMenu.Button {
         this._updateUnsplashOrnaments();
     }
 
-    _updateProviderOrnaments() {
-        const isOnline = this._settings.get_string('wallpaper-source') === 'online';
-        const current = this._settings.get_string('default-provider');
-        for (const item of this._providerMenuItems) {
-            item.setOrnament(isOnline && item._providerKey === current
+    _updateOrnaments(items, activeKey, prop) {
+        for (const item of items) {
+            item.setOrnament(item[prop] === activeKey
                 ? PopupMenu.Ornament.CHECK
                 : PopupMenu.Ornament.NONE);
         }
+    }
+
+    _updateProviderOrnaments() {
+        const active = this._settings.get_string('wallpaper-source') === 'online'
+            ? this._settings.get_string('default-provider')
+            : null;
+        this._updateOrnaments(this._providerMenuItems, active, '_providerKey');
     }
 
     _updateWallhavenOrnaments() {
-        const current = this._settings.get_string('wallhaven-category');
-        for (const item of this._wallhavenMenuItems) {
-            item.setOrnament(item._categoryKey === current
-                ? PopupMenu.Ornament.CHECK
-                : PopupMenu.Ornament.NONE);
-        }
+        this._updateOrnaments(
+            this._wallhavenMenuItems,
+            this._settings.get_string('wallhaven-category'),
+            '_categoryKey'
+        );
     }
 
     _updateUnsplashOrnaments() {
-        const current = this._settings.get_string('unsplash-category');
-        for (const item of this._unsplashMenuItems) {
-            item.setOrnament(item._categoryKey === current
-                ? PopupMenu.Ornament.CHECK
-                : PopupMenu.Ornament.NONE);
-        }
+        this._updateOrnaments(
+            this._unsplashMenuItems,
+            this._settings.get_string('unsplash-category'),
+            '_categoryKey'
+        );
     }
 
     _updateCategoryVisibility() {
@@ -681,72 +551,91 @@ class WchangerIndicator extends PanelMenu.Button {
             return;
         }
 
-        const provider = this._settings.get_string('default-provider');
-        const args = ['--online', provider, '--no-repetition'];
-        if (this._settings.get_boolean('enable-multi-monitor'))
-            args.push('-m');
+        this._rotateOnline(this._settings.get_string('default-provider'));
+    }
+
+    _rotateOnline(provider, multiMonitor = this._settings.get_boolean('enable-multi-monitor')) {
+        let category = '';
+        let unsplashKey = '';
 
         if (provider === 'wallhaven') {
-            const cat = this._settings.get_string('wallhaven-category').trim();
-            if (cat)
-                args.push('-C', cat);
+            category = this._settings.get_string('wallhaven-category').trim();
         } else if (provider === 'unsplash') {
-            const key = this._settings.get_string('unsplash-access-key').trim();
-            if (!key) {
+            unsplashKey = this._settings.get_string('unsplash-access-key').trim();
+            if (!unsplashKey) {
                 Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
                 return;
             }
             const cat = this._settings.get_string('unsplash-category').trim();
             if (cat && cat !== 'all')
-                args.push('-C', cat);
-            args.push('--unsplash-key', key);
+                category = cat;
         }
 
-        this._runWchangerCommand(args);
+        this._callWchangerDbus(provider, category, unsplashKey, multiMonitor);
     }
 
     _cancelActiveRotation() {
-        if (this._activeProc) {
-            this._activeProc.force_exit();
-            this._activeProc = null;
+        if (this._rotationCancellable) {
+            this._rotationCancellable.cancel();
+            this._rotationCancellable = null;
         }
     }
 
-    _runWchangerCommand(args) {
-        const customPath = this._settings.get_string('custom-wchanger-path');
-        const baseCmd = getWchangerCommand(customPath);
-        if (!baseCmd) {
-            Main.notify('Anahita Wallpaper Changer', _('“wchanger” command not found. Please install via “pip install .” or configure path in settings.'));
-            return;
-        }
-
+    _callWchangerDbus(provider, category, unsplashKey, multiMonitor) {
         this._cancelActiveRotation();
 
-        const fullArgv = [...baseCmd, ...args];
-        const proc = runCommandAsync(fullArgv, (success, stdout, stderr) => {
-            if (this._activeProc !== proc)
-                return;
-            this._activeProc = null;
+        const cancellable = new Gio.Cancellable();
+        this._rotationCancellable = cancellable;
 
-            if (success) {
-                this._syncCurrentBackground();
-                return;
+        Gio.DBus.session.call(
+            DBUS_BUS_NAME,
+            DBUS_OBJECT_PATH,
+            DBUS_INTERFACE_NAME,
+            'RotateOnline',
+            new GLib.Variant('(sssb)', [provider, category, unsplashKey, multiMonitor]),
+            new GLib.VariantType('(bs)'),
+            Gio.DBusCallFlags.NONE,
+            30000,
+            cancellable,
+            (conn, res) => {
+                if (this._rotationCancellable !== cancellable)
+                    return;
+                this._rotationCancellable = null;
+
+                try {
+                    const reply = conn.call_finish(res);
+                    const [success, message] = reply.deep_unpack();
+
+                    if (success) {
+                        this._syncCurrentBackground();
+                        return;
+                    }
+
+                    const isUnsplash = provider === 'unsplash';
+                    const err = (message || '').toLowerCase();
+
+                    if (isUnsplash && (err.includes('access key') || !unsplashKey)) {
+                        Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
+                    } else if (isUnsplash && (err.includes('401') || err.includes('unauthorized'))) {
+                        Main.notify('Anahita Wallpaper Changer', _('Unsplash API authentication failed (HTTP 401). Your Access Key is invalid or expired.'));
+                    } else if (isUnsplash && (err.includes('403') || err.includes('rate limit'))) {
+                        Main.notify('Anahita Wallpaper Changer', _('Unsplash hourly rate limit exceeded (HTTP 403). Free tier is limited to 50 requests/hour.'));
+                    } else {
+                        Main.notify('Anahita Wallpaper Changer', _('Failed to rotate wallpaper. Please verify image path or online connection.'));
+                    }
+                } catch (e) {
+                    if (e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        return;
+
+                    const msg = (e.message || '').toLowerCase();
+                    if (msg.includes('serviceunknown') || msg.includes('namehasnoowner')) {
+                        Main.notify('Anahita Wallpaper Changer', _('D-Bus service not available. Run “wchanger --install-dbus” to enable it.'));
+                    } else {
+                        Main.notify('Anahita Wallpaper Changer', _('Failed to rotate wallpaper. Please verify image path or online connection.'));
+                    }
+                }
             }
-
-            const isUnsplash = args.includes('unsplash');
-            const err = `${stderr} ${stdout}`.toLowerCase();
-
-            if (isUnsplash && (err.includes('access key') || !this._settings.get_string('unsplash-access-key').trim())) {
-                Main.notify('Anahita Wallpaper Changer', _('Unsplash requires an API Access Key. Please configure your key in Extension Settings or see the Setup Guide.'));
-            } else if (isUnsplash && (err.includes('401') || err.includes('unauthorized'))) {
-                Main.notify('Anahita Wallpaper Changer', _('Unsplash API authentication failed (HTTP 401). Your Access Key is invalid or expired.'));
-            } else if (isUnsplash && (err.includes('403') || err.includes('rate limit'))) {
-                Main.notify('Anahita Wallpaper Changer', _('Unsplash hourly rate limit exceeded (HTTP 403). Free tier is limited to 50 requests/hour.'));
-            } else {
-                Main.notify('Anahita Wallpaper Changer', _('Failed to rotate wallpaper. Please verify image path or online connection.'));
-            }
-        });
-        this._activeProc = proc;
+        );
     }
 
     _updateNavButtons() {
@@ -845,9 +734,19 @@ class WchangerIndicator extends PanelMenu.Button {
     }
 
     _controlSystemdService(action) {
-        if (!GLib.find_program_in_path('systemctl'))
-            return;
-        runCommandAsync(['systemctl', '--user', action, 'wallpaper-changer.service']);
+        const method = action === 'start' ? 'StartUnit' : 'StopUnit';
+        Gio.DBus.session.call(
+            'org.freedesktop.systemd1',
+            '/org/freedesktop/systemd1',
+            'org.freedesktop.systemd1.Manager',
+            method,
+            new GLib.Variant('(ss)', ['wallpaper-changer.service', 'replace']),
+            new GLib.VariantType('(o)'),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            null
+        );
     }
 
     destroy() {
@@ -855,27 +754,17 @@ class WchangerIndicator extends PanelMenu.Button {
         this._cancelActiveRotation();
         this.disconnectObject();
 
-        if (this._settings) {
-            this._settings.disconnectObject(this);
-            this._settings = null;
-        }
-        if (this._bgSettings) {
-            this._bgSettings.disconnectObject(this);
-            this._bgSettings = null;
-        }
+        this._settings?.disconnectObject(this);
+        this._settings = null;
+        this._bgSettings?.disconnectObject(this);
+        this._bgSettings = null;
 
         super.destroy();
-    }
-
-    _onDestroy() {
-        this.destroy();
-        super._onDestroy();
     }
 }
 
 export default class WchangerExtension extends Extension {
     enable() {
-        this.initTranslations();
         this._settings = this.getSettings();
         this._indicator = null;
 

@@ -74,6 +74,7 @@ if command -v gnome-shell >/dev/null 2>&1; then
     read -r -p "[?] Would you like to install the Anahita GNOME Shell Extension? [Y/n]: " INSTALL_EXT || true
     INSTALL_EXT="${INSTALL_EXT:-Y}"
     if [[ "$INSTALL_EXT" =~ ^[Yy]$ ]]; then
+        "$WCHANGER_PATH" --install-dbus || true
         make install-extension
     fi
 fi
