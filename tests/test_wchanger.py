@@ -3971,6 +3971,12 @@ class TestWallpaperChanger(unittest.TestCase):
         self.assertEqual(len(mock_set.call_args.kwargs["wallpaper_path"]), 2)
 
 
+    def test_download_online_wallpaper_rejects_file_scheme(self) -> None:
+        """download_online_wallpaper should reject non-http(s) URL schemes."""
+        with self.assertRaises(ValueError):
+            wchanger.download_online_wallpaper("file:///etc/passwd", self.test_dir / "out.jpg")
+
+
 if __name__ == "__main__":
     unittest.main()
 

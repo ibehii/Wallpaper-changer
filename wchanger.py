@@ -762,8 +762,8 @@ def get_kde_desktop_count(qdbus_executable: str | None = None) -> int:
         query_result = subprocess.run(command, capture_output=True, text=True, check=False)
         if query_result.returncode == 0 and query_result.stdout.strip().isdigit():
             return int(query_result.stdout.strip())
-    except Exception:
-        pass
+    except OSError:
+        return 0
     return 0
 
 
@@ -1133,50 +1133,29 @@ def set_kde_background(
     if not selected_executable:
         return False
 
-    if isinstance(file_uri, (str, Path)):
-        wallpaper_uris = [str(file_uri)]
-        is_single = True
-    else:
-        wallpaper_uris = [str(uri_item) for uri_item in file_uri]
-        is_single = len(wallpaper_uris) == 1
+    raw_uris = [file_uri] if isinstance(file_uri, (str, Path)) else list(file_uri)
+    if not raw_uris:
+        return False
 
-    if is_single:
-        single_uri = wallpaper_uris[0]
-        if not single_uri.startswith("file://"):
-            single_uri = Path(single_uri).resolve().as_uri()
+    encoded_uris: list[str] = []
+    for raw_uri in raw_uris:
+        uri_str = str(raw_uri)
+        if not uri_str.startswith("file://"):
+            uri_str = Path(uri_str).resolve().as_uri()
+        encoded_uris.append(json.dumps(uri_str))
 
-        safe_uri = (
-            single_uri.replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "")
-            .replace("\r", "")
-        )
-
+    if len(encoded_uris) == 1:
         script_content = (
             "const allDesktops = desktops();\n"
             "for (const desktop of allDesktops) {\n"
             '    desktop.wallpaperPlugin = "org.kde.image";\n'
             '    desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");\n'
-            f'    desktop.writeConfig("Image", "{safe_uri}");\n'
-            '    desktop.reloadConfig();\n'
+            f'    desktop.writeConfig("Image", {encoded_uris[0]});\n'
+            "    desktop.reloadConfig();\n"
             "}\n"
         )
     else:
-        normalized_uris: list[str] = []
-        for raw_uri in wallpaper_uris:
-            if not raw_uri.startswith("file://"):
-                normalized_uri = Path(raw_uri).resolve().as_uri()
-            else:
-                normalized_uri = raw_uri
-            safe_uri = (
-                normalized_uri.replace("\\", "\\\\")
-                .replace('"', '\\"')
-                .replace("\n", "")
-                .replace("\r", "")
-            )
-            normalized_uris.append(safe_uri)
-
-        js_array_items = ", ".join(f'"{wallpaper_uri}"' for wallpaper_uri in normalized_uris)
+        js_array_items = ", ".join(encoded_uris)
         script_content = (
             "const allDesktops = desktops();\n"
             f"const wallpaperList = [{js_array_items}];\n"
@@ -1711,6 +1690,8 @@ def download_online_wallpaper(
 ) -> Path:
     """Download remote image from URL and stream to destination cache with retries."""
     _ensure_urllib()
+    if urlparse(image_url).scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme in '{image_url}'.")
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     request = Request(image_url, headers={"User-Agent": f"AwesomeWallpaperChanger/{VERSION} (Linux; x86_64)"})
     chunk_size = 64 * 1024
@@ -2758,6 +2739,7 @@ def run_dbus_service(
     node_info = Gio.DBusNodeInfo.new_for_xml(DBUS_INTERFACE_XML)
     interface_info = node_info.lookup_interface(DBUS_INTERFACE_NAME)
     loop = GLib.MainLoop()
+    rotation_lock = threading.Lock()
 
     def handle_method_call(
         connection: Any,
@@ -2776,17 +2758,18 @@ def run_dbus_service(
             provider, category, unsplash_key, multi_monitor = parameters.unpack()
 
             def worker() -> None:
-                success, message = apply_online_wallpaper_once(
-                    provider=provider,
-                    category=category,
-                    unsplash_key=unsplash_key,
-                    multi_monitor=bool(multi_monitor),
-                    desktop_environment=desktop_override,
-                    color_theme=color_theme,
-                    cache_dir=custom_cache_dir,
-                    keep_last=keep_last,
-                    prefetch=prefetch,
-                )
+                with rotation_lock:
+                    success, message = apply_online_wallpaper_once(
+                        provider=provider,
+                        category=category,
+                        unsplash_key=unsplash_key,
+                        multi_monitor=bool(multi_monitor),
+                        desktop_environment=desktop_override,
+                        color_theme=color_theme,
+                        cache_dir=custom_cache_dir,
+                        keep_last=keep_last,
+                        prefetch=prefetch,
+                    )
                 GLib.idle_add(lambda: (invocation.return_value(GLib.Variant("(bs)", (success, message))), False)[1])
 
             threading.Thread(target=worker, daemon=True).start()

@@ -84,12 +84,17 @@ class HistoryManager {
             const [ok, contents] = fileObj.load_contents_finish(res);
             if (!ok)
                 return;
-            const data = JSON.parse(new TextDecoder().decode(contents));
-            if (Array.isArray(data.items)) {
-                this._history = data.items;
-                this._currentIndex = typeof data.currentIndex === 'number'
-                    ? data.currentIndex
-                    : this._history.length - 1;
+            try {
+                const data = JSON.parse(new TextDecoder().decode(contents));
+                if (Array.isArray(data.items)) {
+                    this._history = data.items;
+                    this._currentIndex = typeof data.currentIndex === 'number'
+                        ? data.currentIndex
+                        : this._history.length - 1;
+                }
+            } catch (e) {
+                if (!(e instanceof SyntaxError))
+                    throw e;
             }
         });
     }
@@ -100,7 +105,7 @@ class HistoryManager {
         const data = JSON.stringify({
             items: this._history.slice(-MAX_HISTORY_ITEMS),
             currentIndex: this._currentIndex,
-        }, null, 2);
+        });
         file.replace_contents_bytes_async(
             new GLib.Bytes(new TextEncoder().encode(data)),
             null,
@@ -646,7 +651,7 @@ class WchangerIndicator extends PanelMenu.Button {
         const uri = this._bgSettings.get_string('picture-uri') ||
             this._bgSettings.get_string('picture-uri-dark');
 
-        if (uri) {
+        if (uri?.startsWith('file://')) {
             const [path] = GLib.filename_from_uri(uri);
             if (path)
                 this._historyManager.recordWallpaper(path);
